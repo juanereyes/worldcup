@@ -39,7 +39,9 @@ button {
 
 button,
 .language-trigger,
-.language-option {
+.language-option,
+.account-trigger,
+.signout-option {
   color: inherit;
 }
 
@@ -52,7 +54,9 @@ img {
 }
 
 .language-trigger,
-.language-option {
+.language-option,
+.account-trigger,
+.signout-option {
   font: inherit;
 }
 
@@ -119,12 +123,15 @@ img {
   gap: 10px;
 }
 
-.language-control {
+.language-control,
+.account-control {
   position: relative;
 }
 
 .language-trigger,
-.language-option {
+.language-option,
+.account-trigger,
+.signout-option {
   align-items: center;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -143,10 +150,21 @@ img {
   min-width: 82px;
 }
 
+.account-trigger {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .language-trigger:hover,
 .language-trigger:focus-visible,
 .language-option:hover,
 .language-option:focus-visible,
+.account-trigger:hover,
+.account-trigger:focus-visible,
+.signout-option:hover,
+.signout-option:focus-visible,
 .signin-link:hover,
 .signin-link:focus-visible {
   border-color: #c7d1c5;
@@ -163,7 +181,8 @@ img {
   width: 24px;
 }
 
-.language-menu {
+.language-menu,
+.account-menu {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -178,11 +197,13 @@ img {
   z-index: 20;
 }
 
-.language-menu[hidden] {
+.language-menu[hidden],
+.account-menu[hidden] {
   display: none;
 }
 
-.language-option {
+.language-option,
+.signout-option {
   box-shadow: none;
   justify-content: flex-start;
   width: 100%;
@@ -191,6 +212,27 @@ img {
 .language-option[aria-current="true"] {
   background: #e9efe8;
   color: var(--green-dark);
+}
+
+.signout-option {
+  color: var(--red);
+  min-width: 142px;
+}
+
+.signout-option:hover,
+.signout-option:focus-visible {
+  border-color: #efc1bd;
+  box-shadow: 0 0 0 3px rgba(200, 61, 53, 0.12);
+}
+
+.signout-option svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 18px;
 }
 
 .signin-link,

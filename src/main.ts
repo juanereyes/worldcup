@@ -14,6 +14,13 @@ type LanguageOption = {
   flagSrc: string;
 };
 
+type CurrentUser = {
+  id: number;
+  username: string;
+  email: string;
+  displayName: string;
+};
+
 type Copy = {
   brandAria: string;
   navAria: string;
@@ -25,6 +32,7 @@ type Copy = {
     matches: string;
   };
   signIn: string;
+  signOut: string;
   eyebrow: string;
   headline: string;
   summary: string;
@@ -59,6 +67,16 @@ const languageOptions: LanguageOption[] = [
 ];
 
 const authClientUrl = "http://127.0.0.1:5174/";
+const authApiUrl = "http://127.0.0.1:8001";
+let currentUser: CurrentUser | null = null;
+
+const signOutIcon = `
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M14 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+    <path d="M10 17l5-5-5-5" />
+    <path d="M15 12H3" />
+  </svg>
+`;
 
 const copy: Record<Language, Copy> = {
   en: {
@@ -72,6 +90,7 @@ const copy: Record<Language, Copy> = {
       matches: "Matches"
     },
     signIn: "Sign in",
+    signOut: "Sign out",
     eyebrow: "FIFA World Cup 2026",
     headline: "Run your tournament pool from kickoff to final whistle.",
     summary:
@@ -114,6 +133,7 @@ const copy: Record<Language, Copy> = {
       matches: "Partidos"
     },
     signIn: "Iniciar sesión",
+    signOut: "Cerrar sesión",
     eyebrow: "Copa Mundial FIFA 2026",
     headline: "Organiza tu polla mundialista desde el primer partido hasta la final.",
     summary:
@@ -208,7 +228,29 @@ const render = (language: Language) => {
               .join("")}
           </div>
         </div>
-        <a class="signin-link" href="${authClientUrl}">${selectedCopy.signIn}</a>
+        ${
+          currentUser
+            ? `
+              <div class="account-control">
+                <button
+                  class="account-trigger"
+                  id="account-trigger"
+                  type="button"
+                  aria-expanded="false"
+                  aria-haspopup="menu"
+                >
+                  ${currentUser.username}
+                </button>
+                <div class="account-menu" id="account-menu" role="menu" hidden>
+                  <button class="signout-option" id="signout-button" type="button" role="menuitem">
+                    ${signOutIcon}
+                    <span>${selectedCopy.signOut}</span>
+                  </button>
+                </div>
+              </div>
+            `
+            : `<a class="signin-link" href="${authClientUrl}">${selectedCopy.signIn}</a>`
+        }
       </div>
     </header>
 
@@ -267,6 +309,10 @@ const render = (language: Language) => {
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
   const languageMenu = document.querySelector<HTMLDivElement>("#language-menu");
   const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
+  const accountControl = document.querySelector<HTMLDivElement>(".account-control");
+  const accountTrigger = document.querySelector<HTMLButtonElement>("#account-trigger");
+  const accountMenu = document.querySelector<HTMLDivElement>("#account-menu");
+  const signOutButton = document.querySelector<HTMLButtonElement>("#signout-button");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -300,6 +346,61 @@ const render = (language: Language) => {
       render(nextLanguage);
     });
   });
+
+  const closeAccountMenu = () => {
+    accountMenu?.setAttribute("hidden", "");
+    accountTrigger?.setAttribute("aria-expanded", "false");
+  };
+
+  accountTrigger?.addEventListener("click", () => {
+    const isOpen = accountMenu?.hasAttribute("hidden") === false;
+
+    if (isOpen) {
+      closeAccountMenu();
+      return;
+    }
+
+    accountMenu?.removeAttribute("hidden");
+    accountTrigger.setAttribute("aria-expanded", "true");
+  });
+
+  accountControl?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeAccountMenu();
+      accountTrigger?.focus();
+    }
+  });
+
+  signOutButton?.addEventListener("click", async () => {
+    try {
+      await fetch(`${authApiUrl}/session`, {
+        method: "DELETE",
+        credentials: "include"
+      });
+    } finally {
+      currentUser = null;
+      render(getStoredLanguage());
+    }
+  });
+};
+
+const loadCurrentUser = async () => {
+  try {
+    const response = await fetch(`${authApiUrl}/session`, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const result = (await response.json()) as { user?: CurrentUser };
+    currentUser = result.user ?? null;
+    render(getStoredLanguage());
+  } catch {
+    currentUser = null;
+  }
 };
 
 render(getStoredLanguage());
+void loadCurrentUser();
