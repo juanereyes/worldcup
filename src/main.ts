@@ -58,6 +58,8 @@ const languageOptions: LanguageOption[] = [
   }
 ];
 
+const authClientUrl = "http://127.0.0.1:5174/";
+
 const copy: Record<Language, Copy> = {
   en: {
     brandAria: "World Cup Picks home",
@@ -206,7 +208,7 @@ const render = (language: Language) => {
               .join("")}
           </div>
         </div>
-        <a class="signin-link" href="#signin">${selectedCopy.signIn}</a>
+        <a class="signin-link" href="${authClientUrl}">${selectedCopy.signIn}</a>
       </div>
     </header>
 
