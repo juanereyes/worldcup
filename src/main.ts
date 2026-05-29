@@ -9,6 +9,8 @@ type Feature = {
 
 type GroupStanding = {
   team: Record<Language, string>;
+  flagSrc: string;
+  flagAlt: Record<Language, string>;
   played: number;
   points: number;
   goalDifference: number;
@@ -103,12 +105,17 @@ const signOutIcon = `
   </svg>
 `;
 
-const createGroup = (letter: string, teams: Array<[string, string]>): WorldCupGroup => ({
+const createGroup = (letter: string, teams: Array<[string, string, string]>): WorldCupGroup => ({
   letter,
   teams: teams.map((team) => ({
     team: {
       en: team[0],
       es: team[1]
+    },
+    flagSrc: `/assets/flags/${team[2]}.svg`,
+    flagAlt: {
+      en: `${team[0]} flag`,
+      es: `Bandera de ${team[1]}`
     },
     played: 0,
     points: 0,
@@ -120,76 +127,76 @@ const createGroup = (letter: string, teams: Array<[string, string]>): WorldCupGr
 
 const worldCupGroups: WorldCupGroup[] = [
   createGroup("A", [
-    ["Mexico", "México"],
-    ["South Africa", "Sudáfrica"],
-    ["South Korea", "Corea del Sur"],
-    ["Czechia", "Chequia"]
+    ["Mexico", "México", "mexico"],
+    ["South Africa", "Sudáfrica", "south_africa"],
+    ["South Korea", "Corea del Sur", "south_korea"],
+    ["Czechia", "Chequia", "czechia"]
   ]),
   createGroup("B", [
-    ["Canada", "Canadá"],
-    ["Bosnia and Herzegovina", "Bosnia y Herzegovina"],
-    ["Qatar", "Catar"],
-    ["Switzerland", "Suiza"]
+    ["Canada", "Canadá", "canada"],
+    ["Bosnia and Herzegovina", "Bosnia y Herzegovina", "bosnia"],
+    ["Qatar", "Catar", "qatar"],
+    ["Switzerland", "Suiza", "switzerland"]
   ]),
   createGroup("C", [
-    ["Brazil", "Brasil"],
-    ["Morocco", "Marruecos"],
-    ["Haiti", "Haití"],
-    ["Scotland", "Escocia"]
+    ["Brazil", "Brasil", "brazil"],
+    ["Morocco", "Marruecos", "morocco"],
+    ["Haiti", "Haití", "haiti"],
+    ["Scotland", "Escocia", "scotland"]
   ]),
   createGroup("D", [
-    ["USA", "Estados Unidos"],
-    ["Paraguay", "Paraguay"],
-    ["Australia", "Australia"],
-    ["Türkiye", "Turquía"]
+    ["USA", "Estados Unidos", "usa"],
+    ["Paraguay", "Paraguay", "paraguay"],
+    ["Australia", "Australia", "australia"],
+    ["Türkiye", "Turquía", "turkiye"]
   ]),
   createGroup("E", [
-    ["Germany", "Alemania"],
-    ["Curaçao", "Curazao"],
-    ["Ivory Coast", "Costa de Marfil"],
-    ["Ecuador", "Ecuador"]
+    ["Germany", "Alemania", "germany"],
+    ["Curaçao", "Curazao", "curacao"],
+    ["Ivory Coast", "Costa de Marfil", "ivory_coast"],
+    ["Ecuador", "Ecuador", "ecuador"]
   ]),
   createGroup("F", [
-    ["Netherlands", "Países Bajos"],
-    ["Japan", "Japón"],
-    ["Sweden", "Suecia"],
-    ["Tunisia", "Túnez"]
+    ["Netherlands", "Países Bajos", "netherlands"],
+    ["Japan", "Japón", "japan"],
+    ["Sweden", "Suecia", "sweden"],
+    ["Tunisia", "Túnez", "tunisia"]
   ]),
   createGroup("G", [
-    ["Belgium", "Bélgica"],
-    ["Egypt", "Egipto"],
-    ["Iran", "Irán"],
-    ["New Zealand", "Nueva Zelanda"]
+    ["Belgium", "Bélgica", "belgium"],
+    ["Egypt", "Egipto", "egypt"],
+    ["Iran", "Irán", "iran"],
+    ["New Zealand", "Nueva Zelanda", "new_zealand"]
   ]),
   createGroup("H", [
-    ["Spain", "España"],
-    ["Cape Verde", "Cabo Verde"],
-    ["Saudi Arabia", "Arabia Saudita"],
-    ["Uruguay", "Uruguay"]
+    ["Spain", "España", "spain"],
+    ["Cape Verde", "Cabo Verde", "cape_verde"],
+    ["Saudi Arabia", "Arabia Saudita", "saudi_arabia"],
+    ["Uruguay", "Uruguay", "uruguay"]
   ]),
   createGroup("I", [
-    ["France", "Francia"],
-    ["Senegal", "Senegal"],
-    ["Iraq", "Irak"],
-    ["Norway", "Noruega"]
+    ["France", "Francia", "france"],
+    ["Senegal", "Senegal", "senegal"],
+    ["Iraq", "Irak", "iraq"],
+    ["Norway", "Noruega", "norway"]
   ]),
   createGroup("J", [
-    ["Argentina", "Argentina"],
-    ["Algeria", "Argelia"],
-    ["Austria", "Austria"],
-    ["Jordan", "Jordania"]
+    ["Argentina", "Argentina", "argentina"],
+    ["Algeria", "Argelia", "algeria"],
+    ["Austria", "Austria", "austria"],
+    ["Jordan", "Jordania", "jordan"]
   ]),
   createGroup("K", [
-    ["Portugal", "Portugal"],
-    ["DR Congo", "RD Congo"],
-    ["Uzbekistan", "Uzbekistán"],
-    ["Colombia", "Colombia"]
+    ["Portugal", "Portugal", "portugal"],
+    ["DR Congo", "RD Congo", "dr_congo"],
+    ["Uzbekistan", "Uzbekistán", "uzbekistan"],
+    ["Colombia", "Colombia", "colombia"]
   ]),
   createGroup("L", [
-    ["England", "Inglaterra"],
-    ["Croatia", "Croacia"],
-    ["Ghana", "Ghana"],
-    ["Panama", "Panamá"]
+    ["England", "Inglaterra", "england"],
+    ["Croatia", "Croacia", "croatia"],
+    ["Ghana", "Ghana", "ghana"],
+    ["Panama", "Panamá", "panama"]
   ])
 ];
 
@@ -349,7 +356,12 @@ const renderStandings = (selectedCopy: Copy, language: Language) => `
                       .map(
                         (standing) => `
                           <tr>
-                            <th scope="row">${standing.team[language]}</th>
+                            <th scope="row">
+                              <span class="team-name">
+                                <img class="team-flag" src="${standing.flagSrc}" alt="${standing.flagAlt[language]}" />
+                                <span>${standing.team[language]}</span>
+                              </span>
+                            </th>
                             <td>${standing.played}</td>
                             <td class="points-column">${standing.points}</td>
                             <td>${standing.goalDifference}</td>

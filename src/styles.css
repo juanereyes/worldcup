@@ -479,10 +479,31 @@ body[data-page="groups"] .groups-section {
 .standings-table th:first-child {
   color: var(--ink);
   font-weight: 650;
-  max-width: 150px;
+  max-width: 170px;
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
+}
+
+.team-name {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.team-name span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-flag {
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(32, 37, 43, 0.1);
+  flex: 0 0 24px;
+  height: 16px;
+  object-fit: cover;
+  width: 24px;
 }
 
 .standings-table td {
