@@ -401,6 +401,100 @@ h1 {
   margin: 0;
 }
 
+.groups-section {
+  margin: 72px auto 0;
+  max-width: 1120px;
+}
+
+body[data-page="groups"] .groups-section {
+  margin-top: 58px;
+}
+
+.section-heading {
+  margin-bottom: 22px;
+}
+
+.section-heading h2 {
+  color: var(--green-dark);
+  font-size: clamp(2rem, 4vw, 3rem);
+  letter-spacing: 0;
+  line-height: 1.08;
+  margin: 0;
+}
+
+.groups-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.group-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(24, 42, 34, 0.08);
+  overflow: hidden;
+}
+
+.group-card h3 {
+  background: #f6f8f3;
+  border-bottom: 1px solid var(--line);
+  color: var(--green-dark);
+  font-size: 1rem;
+  margin: 0;
+  padding: 14px 16px;
+}
+
+.standings-table-wrap {
+  overflow-x: auto;
+}
+
+.standings-table {
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  min-width: 100%;
+  width: 100%;
+}
+
+.standings-table th,
+.standings-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 11px 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.standings-table tr:last-child th,
+.standings-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.standings-table thead th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.standings-table th:first-child {
+  color: var(--ink);
+  font-weight: 650;
+  max-width: 150px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.standings-table td {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.standings-table .points-column {
+  color: var(--green-dark);
+  font-weight: 850;
+}
+
 @media (max-width: 840px) {
   .page-shell {
     padding: 18px;
@@ -427,6 +521,10 @@ h1 {
   .feature-grid {
     grid-template-columns: 1fr;
     margin-top: 40px;
+  }
+
+  .groups-grid {
+    grid-template-columns: 1fr;
   }
 }
 

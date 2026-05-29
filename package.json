@@ -10,7 +10,7 @@
     "dev": "vite",
     "auth:dev": "npm run dev --workspace @worldcup/auth-client",
     "auth:build": "npm run build --workspace @worldcup/auth-client",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && copy /Y dist\\index.html dist\\groups.html",
     "preview": "vite preview"
   },
   "devDependencies": {

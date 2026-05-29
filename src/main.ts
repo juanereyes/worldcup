@@ -7,6 +7,20 @@ type Feature = {
   detail: string;
 };
 
+type GroupStanding = {
+  team: Record<Language, string>;
+  played: number;
+  points: number;
+  goalDifference: number;
+  goalsScored: number;
+  goalsAgainst: number;
+};
+
+type WorldCupGroup = {
+  letter: string;
+  teams: GroupStanding[];
+};
+
 type LanguageOption = {
   code: Language;
   label: string;
@@ -49,6 +63,17 @@ type Copy = {
   };
   featuresAria: string;
   features: Feature[];
+  standings: {
+    title: string;
+    aria: string;
+    groupLabel: (letter: string) => string;
+    team: string;
+    played: string;
+    points: string;
+    goalDifference: string;
+    goalsScored: string;
+    goalsAgainst: string;
+  };
 };
 
 const languageOptions: LanguageOption[] = [
@@ -77,6 +102,96 @@ const signOutIcon = `
     <path d="M15 12H3" />
   </svg>
 `;
+
+const createGroup = (letter: string, teams: Array<[string, string]>): WorldCupGroup => ({
+  letter,
+  teams: teams.map((team) => ({
+    team: {
+      en: team[0],
+      es: team[1]
+    },
+    played: 0,
+    points: 0,
+    goalDifference: 0,
+    goalsScored: 0,
+    goalsAgainst: 0
+  }))
+});
+
+const worldCupGroups: WorldCupGroup[] = [
+  createGroup("A", [
+    ["Mexico", "México"],
+    ["South Africa", "Sudáfrica"],
+    ["South Korea", "Corea del Sur"],
+    ["Czechia", "Chequia"]
+  ]),
+  createGroup("B", [
+    ["Canada", "Canadá"],
+    ["Bosnia and Herzegovina", "Bosnia y Herzegovina"],
+    ["Qatar", "Catar"],
+    ["Switzerland", "Suiza"]
+  ]),
+  createGroup("C", [
+    ["Brazil", "Brasil"],
+    ["Morocco", "Marruecos"],
+    ["Haiti", "Haití"],
+    ["Scotland", "Escocia"]
+  ]),
+  createGroup("D", [
+    ["USA", "Estados Unidos"],
+    ["Paraguay", "Paraguay"],
+    ["Australia", "Australia"],
+    ["Türkiye", "Turquía"]
+  ]),
+  createGroup("E", [
+    ["Germany", "Alemania"],
+    ["Curaçao", "Curazao"],
+    ["Ivory Coast", "Costa de Marfil"],
+    ["Ecuador", "Ecuador"]
+  ]),
+  createGroup("F", [
+    ["Netherlands", "Países Bajos"],
+    ["Japan", "Japón"],
+    ["Sweden", "Suecia"],
+    ["Tunisia", "Túnez"]
+  ]),
+  createGroup("G", [
+    ["Belgium", "Bélgica"],
+    ["Egypt", "Egipto"],
+    ["Iran", "Irán"],
+    ["New Zealand", "Nueva Zelanda"]
+  ]),
+  createGroup("H", [
+    ["Spain", "España"],
+    ["Cape Verde", "Cabo Verde"],
+    ["Saudi Arabia", "Arabia Saudita"],
+    ["Uruguay", "Uruguay"]
+  ]),
+  createGroup("I", [
+    ["France", "Francia"],
+    ["Senegal", "Senegal"],
+    ["Iraq", "Irak"],
+    ["Norway", "Noruega"]
+  ]),
+  createGroup("J", [
+    ["Argentina", "Argentina"],
+    ["Algeria", "Argelia"],
+    ["Austria", "Austria"],
+    ["Jordan", "Jordania"]
+  ]),
+  createGroup("K", [
+    ["Portugal", "Portugal"],
+    ["DR Congo", "RD Congo"],
+    ["Uzbekistan", "Uzbekistán"],
+    ["Colombia", "Colombia"]
+  ]),
+  createGroup("L", [
+    ["England", "Inglaterra"],
+    ["Croatia", "Croacia"],
+    ["Ghana", "Ghana"],
+    ["Panama", "Panamá"]
+  ])
+];
 
 const copy: Record<Language, Copy> = {
   en: {
@@ -120,7 +235,18 @@ const copy: Record<Language, Copy> = {
         title: "Custom scoring",
         detail: "Shape the point rules around exact scores, winners, draws, and bonuses."
       }
-    ]
+    ],
+    standings: {
+      title: "World Cup groups",
+      aria: "World Cup group standings",
+      groupLabel: (letter) => `Group ${letter}`,
+      team: "Team",
+      played: "P",
+      points: "Pts",
+      goalDifference: "GD",
+      goalsScored: "GF",
+      goalsAgainst: "GA"
+    }
   },
   es: {
     brandAria: "Inicio de World Cup Picks",
@@ -163,7 +289,18 @@ const copy: Record<Language, Copy> = {
         title: "Puntuación personalizada",
         detail: "Define reglas para marcadores exactos, ganadores, empates y bonificaciones."
       }
-    ]
+    ],
+    standings: {
+      title: "Grupos del Mundial",
+      aria: "Tabla de posiciones de los grupos del Mundial",
+      groupLabel: (letter) => `Grupo ${letter}`,
+      team: "Equipo",
+      played: "PJ",
+      points: "Pts",
+      goalDifference: "DG",
+      goalsScored: "GF",
+      goalsAgainst: "GC"
+    }
   }
 };
 
@@ -178,131 +315,194 @@ const getStoredLanguage = (): Language => {
   return language === "es" ? "es" : "en";
 };
 
+const getCurrentPage = () =>
+  document.body.dataset.page === "groups" || window.location.pathname.endsWith("/groups.html")
+    ? "groups"
+    : "home";
+
+const renderStandings = (selectedCopy: Copy, language: Language) => `
+  <section class="groups-section" id="groups" aria-label="${selectedCopy.standings.aria}">
+    <div class="section-heading">
+      <p class="eyebrow">FIFA World Cup 2026</p>
+      <h2>${selectedCopy.standings.title}</h2>
+    </div>
+    <div class="groups-grid">
+      ${worldCupGroups
+        .map(
+          (group) => `
+            <article class="group-card">
+              <h3>${selectedCopy.standings.groupLabel(group.letter)}</h3>
+              <div class="standings-table-wrap">
+                <table class="standings-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">${selectedCopy.standings.team}</th>
+                      <th scope="col">${selectedCopy.standings.played}</th>
+                      <th scope="col" class="points-column">${selectedCopy.standings.points}</th>
+                      <th scope="col">${selectedCopy.standings.goalDifference}</th>
+                      <th scope="col">${selectedCopy.standings.goalsScored}</th>
+                      <th scope="col">${selectedCopy.standings.goalsAgainst}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${group.teams
+                      .map(
+                        (standing) => `
+                          <tr>
+                            <th scope="row">${standing.team[language]}</th>
+                            <td>${standing.played}</td>
+                            <td class="points-column">${standing.points}</td>
+                            <td>${standing.goalDifference}</td>
+                            <td>${standing.goalsScored}</td>
+                            <td>${standing.goalsAgainst}</td>
+                          </tr>
+                        `
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+  </section>
+`;
+
+const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | undefined, language: Language) => `
+  <header class="topbar" aria-label="${selectedCopy.navAria}">
+    <a class="brand" href="/" aria-label="${selectedCopy.brandAria}">
+      <span class="brand-mark" aria-hidden="true">26</span>
+      <span>World Cup Picks</span>
+    </a>
+    <nav class="nav-links" aria-label="${selectedCopy.navAria}">
+      <a href="/groups.html">${selectedCopy.nav.groups}</a>
+      <a href="/#scoring">${selectedCopy.nav.scoring}</a>
+      <a href="/#matches">${selectedCopy.nav.matches}</a>
+    </nav>
+    <div class="topbar-actions">
+      <div class="language-control">
+        <button
+          class="language-trigger"
+          id="language-trigger"
+          type="button"
+          aria-expanded="false"
+          aria-haspopup="menu"
+          aria-label="${selectedCopy.languageLabel}"
+        >
+          <img src="${selectedLanguage?.flagSrc}" alt="${selectedLanguage?.flagAlt}" />
+          <span>${selectedLanguage?.label}</span>
+        </button>
+        <div class="language-menu" id="language-menu" role="menu" hidden>
+          ${languageOptions
+            .map(
+              (option) => `
+                <button
+                  class="language-option"
+                  type="button"
+                  role="menuitem"
+                  data-language="${option.code}"
+                  aria-current="${option.code === language ? "true" : "false"}"
+                >
+                  <img src="${option.flagSrc}" alt="${option.flagAlt}" />
+                  <span>${option.label}</span>
+                </button>
+              `
+            )
+            .join("")}
+        </div>
+      </div>
+      ${
+        currentUser
+          ? `
+            <div class="account-control">
+              <button
+                class="account-trigger"
+                id="account-trigger"
+                type="button"
+                aria-expanded="false"
+                aria-haspopup="menu"
+              >
+                ${currentUser.username}
+              </button>
+              <div class="account-menu" id="account-menu" role="menu" hidden>
+                <button class="signout-option" id="signout-button" type="button" role="menuitem">
+                  ${signOutIcon}
+                  <span>${selectedCopy.signOut}</span>
+                </button>
+              </div>
+            </div>
+          `
+          : `<a class="signin-link" href="${authClientUrl}">${selectedCopy.signIn}</a>`
+      }
+    </div>
+  </header>
+`;
+
+const renderHomePage = (selectedCopy: Copy) => `
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <p class="eyebrow">${selectedCopy.eyebrow}</p>
+      <h1 id="hero-title">${selectedCopy.headline}</h1>
+      <p class="hero-summary">
+        ${selectedCopy.summary}
+      </p>
+      <div class="hero-actions">
+        <a class="primary-action" href="#create-group">${selectedCopy.actions.createGroup}</a>
+        <a class="secondary-action" href="#join-group">${selectedCopy.actions.joinGroup}</a>
+      </div>
+    </div>
+
+    <aside class="match-preview" aria-label="${selectedCopy.matchAria}">
+      <div class="match-preview-header">
+        <span>${selectedCopy.match.stage}</span>
+        <strong>${selectedCopy.match.closes}</strong>
+      </div>
+      <div class="teams">
+        <div class="team-row">
+          <span class="flag">USA</span>
+          <span>${selectedCopy.match.homeTeam}</span>
+          <strong>2</strong>
+        </div>
+        <div class="team-row">
+          <span class="flag">COL</span>
+          <span>${selectedCopy.match.awayTeam}</span>
+          <strong>1</strong>
+        </div>
+      </div>
+      <div class="score-breakdown">
+        <span>${selectedCopy.match.scoreType}</span>
+        <strong>+5 pts</strong>
+      </div>
+    </aside>
+  </section>
+
+  <section class="feature-grid" aria-label="${selectedCopy.featuresAria}">
+    ${selectedCopy.features
+      .map(
+        (feature) => `
+          <article class="feature-card">
+            <h2>${feature.title}</h2>
+            <p>${feature.detail}</p>
+          </article>
+        `
+      )
+      .join("")}
+  </section>
+`;
+
 const render = (language: Language) => {
   const selectedCopy = copy[language];
   const selectedLanguage = languageOptions.find((option) => option.code === language);
+  const currentPage = getCurrentPage();
 
   document.documentElement.lang = language;
 
   app.innerHTML = `
   <section class="page-shell">
-    <header class="topbar" aria-label="${selectedCopy.navAria}">
-      <a class="brand" href="/" aria-label="${selectedCopy.brandAria}">
-        <span class="brand-mark" aria-hidden="true">26</span>
-        <span>World Cup Picks</span>
-      </a>
-      <nav class="nav-links" aria-label="${selectedCopy.navAria}">
-        <a href="#groups">${selectedCopy.nav.groups}</a>
-        <a href="#scoring">${selectedCopy.nav.scoring}</a>
-        <a href="#matches">${selectedCopy.nav.matches}</a>
-      </nav>
-      <div class="topbar-actions">
-        <div class="language-control">
-          <button
-            class="language-trigger"
-            id="language-trigger"
-            type="button"
-            aria-expanded="false"
-            aria-haspopup="menu"
-            aria-label="${selectedCopy.languageLabel}"
-          >
-            <img src="${selectedLanguage?.flagSrc}" alt="${selectedLanguage?.flagAlt}" />
-            <span>${selectedLanguage?.label}</span>
-          </button>
-          <div class="language-menu" id="language-menu" role="menu" hidden>
-            ${languageOptions
-              .map(
-                (option) => `
-                  <button
-                    class="language-option"
-                    type="button"
-                    role="menuitem"
-                    data-language="${option.code}"
-                    aria-current="${option.code === language ? "true" : "false"}"
-                  >
-                    <img src="${option.flagSrc}" alt="${option.flagAlt}" />
-                    <span>${option.label}</span>
-                  </button>
-                `
-              )
-              .join("")}
-          </div>
-        </div>
-        ${
-          currentUser
-            ? `
-              <div class="account-control">
-                <button
-                  class="account-trigger"
-                  id="account-trigger"
-                  type="button"
-                  aria-expanded="false"
-                  aria-haspopup="menu"
-                >
-                  ${currentUser.username}
-                </button>
-                <div class="account-menu" id="account-menu" role="menu" hidden>
-                  <button class="signout-option" id="signout-button" type="button" role="menuitem">
-                    ${signOutIcon}
-                    <span>${selectedCopy.signOut}</span>
-                  </button>
-                </div>
-              </div>
-            `
-            : `<a class="signin-link" href="${authClientUrl}">${selectedCopy.signIn}</a>`
-        }
-      </div>
-    </header>
-
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="eyebrow">${selectedCopy.eyebrow}</p>
-        <h1 id="hero-title">${selectedCopy.headline}</h1>
-        <p class="hero-summary">
-          ${selectedCopy.summary}
-        </p>
-        <div class="hero-actions">
-          <a class="primary-action" href="#create-group">${selectedCopy.actions.createGroup}</a>
-          <a class="secondary-action" href="#join-group">${selectedCopy.actions.joinGroup}</a>
-        </div>
-      </div>
-
-      <aside class="match-preview" aria-label="${selectedCopy.matchAria}">
-        <div class="match-preview-header">
-          <span>${selectedCopy.match.stage}</span>
-          <strong>${selectedCopy.match.closes}</strong>
-        </div>
-        <div class="teams">
-          <div class="team-row">
-            <span class="flag">USA</span>
-            <span>${selectedCopy.match.homeTeam}</span>
-            <strong>2</strong>
-          </div>
-          <div class="team-row">
-            <span class="flag">COL</span>
-            <span>${selectedCopy.match.awayTeam}</span>
-            <strong>1</strong>
-          </div>
-        </div>
-        <div class="score-breakdown">
-          <span>${selectedCopy.match.scoreType}</span>
-          <strong>+5 pts</strong>
-        </div>
-      </aside>
-    </section>
-
-    <section class="feature-grid" aria-label="${selectedCopy.featuresAria}">
-      ${selectedCopy.features
-        .map(
-          (feature) => `
-            <article class="feature-card">
-              <h2>${feature.title}</h2>
-              <p>${feature.detail}</p>
-            </article>
-          `
-        )
-        .join("")}
-    </section>
+    ${renderTopbar(selectedCopy, selectedLanguage, language)}
+    ${currentPage === "groups" ? renderStandings(selectedCopy, language) : renderHomePage(selectedCopy)}
   </section>
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
