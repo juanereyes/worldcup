@@ -241,6 +241,12 @@ def format_api_label(label: str) -> str:
     return label.replace("_", " ").title()
 
 
+def team_name(team: dict[str, Any]) -> str:
+    name = team.get("name")
+
+    return str(name) if isinstance(name, str) and name else "TBD"
+
+
 def normalize_match(match: dict[str, Any]) -> CarouselMatch:
     score = match.get("score") if isinstance(match.get("score"), dict) else {}
     full_time = score.get("fullTime") if isinstance(score.get("fullTime"), dict) else {}
@@ -253,8 +259,8 @@ def normalize_match(match: dict[str, Any]) -> CarouselMatch:
         status=str(match.get("status", "")),
         stage=format_api_label(str(match.get("stage", ""))),
         group=format_api_label(match.get("group")) if isinstance(match.get("group"), str) else None,
-        home_team=str(home_team.get("name", "TBD")),
-        away_team=str(away_team.get("name", "TBD")),
+        home_team=team_name(home_team),
+        away_team=team_name(away_team),
         home_score=full_time.get("home") if isinstance(full_time.get("home"), int) else None,
         away_score=full_time.get("away") if isinstance(full_time.get("away"), int) else None,
     )

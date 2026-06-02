@@ -42,7 +42,7 @@ type CurrentUser = {
   displayName: string;
 };
 
-type Page = "home" | "groups" | "matches";
+type Page = "home" | "groups" | "matches" | "bracket";
 
 type CarouselMatch = {
   id: number;
@@ -65,7 +65,7 @@ type Copy = {
   languageLabel: string;
   nav: {
     groups: string;
-    scoring: string;
+    bracket: string;
     matches: string;
   };
   signIn: string;
@@ -108,6 +108,13 @@ type Copy = {
     error: string;
     empty: string;
     allMatches: string;
+  };
+  bracketPage: {
+    title: string;
+    aria: string;
+    loading: string;
+    error: string;
+    empty: string;
   };
 };
 
@@ -338,7 +345,7 @@ const copy: Record<Language, Copy> = {
     languageLabel: "Language",
     nav: {
       groups: "Groups",
-      scoring: "Scoring",
+      bracket: "Bracket",
       matches: "Matches"
     },
     signIn: "Sign in",
@@ -395,6 +402,13 @@ const copy: Record<Language, Copy> = {
       error: "Matches are not available right now.",
       empty: "No matches found.",
       allMatches: "All matches"
+    },
+    bracketPage: {
+      title: "World Cup bracket",
+      aria: "World Cup knockout bracket",
+      loading: "Loading bracket...",
+      error: "The bracket is not available right now.",
+      empty: "No knockout matches found."
     }
   },
   es: {
@@ -404,7 +418,7 @@ const copy: Record<Language, Copy> = {
     languageLabel: "Idioma",
     nav: {
       groups: "Grupos",
-      scoring: "Puntuación",
+      bracket: "Llaves",
       matches: "Partidos"
     },
     signIn: "Iniciar sesión",
@@ -461,6 +475,13 @@ const copy: Record<Language, Copy> = {
       error: "Los partidos no están disponibles en este momento.",
       empty: "No se encontraron partidos.",
       allMatches: "Todos los partidos"
+    },
+    bracketPage: {
+      title: "Llaves del Mundial",
+      aria: "Llaves de eliminación directa del Mundial",
+      loading: "Cargando llaves...",
+      error: "Las llaves no están disponibles en este momento.",
+      empty: "No se encontraron partidos de eliminación directa."
     }
   }
 };
@@ -483,6 +504,10 @@ const getCurrentPage = (): Page => {
 
   if (document.body.dataset.page === "matches" || window.location.pathname.endsWith("/matches.html")) {
     return "matches";
+  }
+
+  if (document.body.dataset.page === "bracket" || window.location.pathname.endsWith("/bracket.html")) {
+    return "bracket";
   }
 
   return "home";
@@ -599,6 +624,67 @@ const localizeMatchLabel = (label: string | null, language: Language) => {
   }
 
   return label;
+};
+
+const knockoutStageOrder = [
+  "Last 32",
+  "Last 16",
+  "Quarter Finals",
+  "Semi Finals",
+  "Third Place",
+  "Final"
+];
+
+const stageDisplayLabels: Record<string, string> = {
+  "Last 16": "Round of 16"
+};
+
+const stageTranslations: Partial<Record<Language, Record<string, string>>> = {
+  es: {
+    "Last 32": "Ronda de 32",
+    "Last 16": "Octavos de final",
+    "Quarter Finals": "Cuartos de final",
+    "Semi Finals": "Semifinales",
+    "Third Place": "Tercer puesto",
+    Final: "Final"
+  }
+};
+
+const localizeStageLabel = (stage: string, language: Language) =>
+  stageTranslations[language]?.[stage] ?? stageDisplayLabels[stage] ?? stage;
+
+const getKnockoutMatches = () =>
+  allMatches
+    .filter((match) => knockoutStageOrder.includes(match.stage))
+    .sort((a, b) => {
+      const stageDifference = knockoutStageOrder.indexOf(a.stage) - knockoutStageOrder.indexOf(b.stage);
+
+      if (stageDifference !== 0) {
+        return stageDifference;
+      }
+
+      return new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime();
+    });
+
+const getWinnerSide = (match: CarouselMatch) => {
+  if (match.status !== "FINISHED" || match.score.home === null || match.score.away === null) {
+    return null;
+  }
+
+  if (match.score.home > match.score.away) return "home";
+  if (match.score.away > match.score.home) return "away";
+
+  return null;
+};
+
+const getBracketLayout = (stageMatchCount: number, matchIndex: number) => {
+  const baseMatchCount = 16;
+  const rowSpan = Math.max(1, Math.floor(baseMatchCount / Math.max(stageMatchCount, 1)));
+
+  return {
+    rowStart: matchIndex * rowSpan + 1,
+    rowSpan
+  };
 };
 
 const getVisibleMatch = () => carouselMatches[activeMatchIndex] ?? carouselMatches[0];
@@ -755,6 +841,101 @@ const renderMatchesPage = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const renderBracketTeam = (match: CarouselMatch, side: "home" | "away", language: Language) => {
+  const teamName = side === "home" ? match.homeTeam : match.awayTeam;
+  const score = side === "home" ? match.score.home : match.score.away;
+  const winnerSide = getWinnerSide(match);
+  const isWinner = winnerSide === side;
+
+  return `
+    <div class="bracket-team${isWinner ? " is-winner" : ""}">
+      <span class="bracket-team-name">
+        ${renderTeamBadge(teamName, language)}
+        <span>${getTeamDisplayName(teamName, language)}</span>
+      </span>
+      ${score === null ? "" : `<strong>${score}</strong>`}
+    </div>
+  `;
+};
+
+const renderBracketMatchCard = (
+  match: CarouselMatch,
+  selectedCopy: Copy,
+  language: Language,
+  matchIndex: number,
+  stageMatchCount: number
+) => {
+  const stage = localizeStageLabel(match.stage, language);
+  const status = getMatchStatusLabel(match.status, selectedCopy);
+  const layout = getBracketLayout(stageMatchCount, matchIndex);
+
+  return `
+    <article
+      class="bracket-match-card"
+      style="--bracket-row-start: ${layout.rowStart}; --bracket-row-span: ${layout.rowSpan};"
+    >
+      <div class="bracket-match-meta">
+        <span>${formatMatchDate(match.utcDate, language)}</span>
+        <strong>${status}</strong>
+      </div>
+      <div class="bracket-teams">
+        ${renderBracketTeam(match, "home", language)}
+        ${renderBracketTeam(match, "away", language)}
+      </div>
+      <div class="bracket-match-footer">
+        <span>${stage}</span>
+      </div>
+    </article>
+  `;
+};
+
+const renderBracketPage = (selectedCopy: Copy, language: Language) => {
+  const knockoutMatches = getKnockoutMatches();
+  const matchesByStage = knockoutStageOrder.map((stage) => ({
+    stage,
+    matches: knockoutMatches.filter((match) => match.stage === stage)
+  }));
+  const hasKnockoutMatches = knockoutMatches.length > 0;
+
+  return `
+    <section class="bracket-section" id="bracket" aria-label="${selectedCopy.bracketPage.aria}">
+      <div class="section-heading">
+        <p class="eyebrow">FIFA World Cup 2026</p>
+        <h2>${selectedCopy.bracketPage.title}</h2>
+      </div>
+      ${
+        isAllMatchesLoading
+          ? `<div class="matches-state">${selectedCopy.bracketPage.loading}</div>`
+          : allMatchesError
+            ? `<div class="matches-state">${selectedCopy.bracketPage.error}</div>`
+            : !hasKnockoutMatches
+              ? `<div class="matches-state">${selectedCopy.bracketPage.empty}</div>`
+              : `
+                <div class="bracket-board">
+                  ${matchesByStage
+                    .filter(({ matches }) => matches.length > 0)
+                    .map(
+                      ({ stage, matches }) => `
+                        <section class="bracket-round" aria-label="${localizeStageLabel(stage, language)}">
+                          <h3>${localizeStageLabel(stage, language)}</h3>
+                          <div class="bracket-round-matches">
+                            ${matches
+                              .map((match, index) =>
+                                renderBracketMatchCard(match, selectedCopy, language, index, matches.length)
+                              )
+                              .join("")}
+                          </div>
+                        </section>
+                      `
+                    )
+                    .join("")}
+                </div>
+              `
+      }
+    </section>
+  `;
+};
+
 const renderStandings = (selectedCopy: Copy, language: Language) => {
   const standings = getComputedStandings();
 
@@ -837,7 +1018,7 @@ const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | und
     </a>
     <nav class="nav-links" aria-label="${selectedCopy.navAria}">
       <a href="/groups.html">${selectedCopy.nav.groups}</a>
-      <a href="/#scoring">${selectedCopy.nav.scoring}</a>
+      <a href="/bracket.html">${selectedCopy.nav.bracket}</a>
       <a href="/matches.html">${selectedCopy.nav.matches}</a>
     </nav>
     <div class="topbar-actions">
@@ -935,6 +1116,7 @@ const render = (language: Language) => {
   const selectedLanguage = languageOptions.find((option) => option.code === language);
   const currentPage = getCurrentPage();
   const pageContent = {
+    bracket: renderBracketPage(selectedCopy, language),
     groups: renderStandings(selectedCopy, language),
     home: renderHomePage(selectedCopy, language),
     matches: renderMatchesPage(selectedCopy, language)
@@ -1086,7 +1268,7 @@ const loadCarouselMatches = async () => {
 const loadAllMatches = async () => {
   const currentPage = getCurrentPage();
 
-  if (currentPage !== "matches" && currentPage !== "groups") {
+  if (currentPage !== "matches" && currentPage !== "groups" && currentPage !== "bracket") {
     return;
   }
 
