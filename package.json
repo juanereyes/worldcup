@@ -10,6 +10,7 @@
     "dev": "vite",
     "auth:dev": "npm run dev --workspace @worldcup/auth-client",
     "auth:build": "npm run build --workspace @worldcup/auth-client",
+    "matches:dev": "C:\\Users\\juane\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe services\\matches\\server\\app.py",
     "build": "tsc && vite build && copy /Y dist\\index.html dist\\groups.html",
     "preview": "vite preview"
   },

@@ -37,6 +37,20 @@ type CurrentUser = {
   displayName: string;
 };
 
+type CarouselMatch = {
+  id: number;
+  utcDate: string;
+  status: string;
+  stage: string;
+  group: string | null;
+  homeTeam: string;
+  awayTeam: string;
+  score: {
+    home: number | null;
+    away: number | null;
+  };
+};
+
 type Copy = {
   brandAria: string;
   navAria: string;
@@ -57,11 +71,15 @@ type Copy = {
     joinGroup: string;
   };
   match: {
-    stage: string;
-    closes: string;
-    homeTeam: string;
-    awayTeam: string;
-    scoreType: string;
+    title: string;
+    loading: string;
+    error: string;
+    empty: string;
+    previous: string;
+    next: string;
+    scheduled: string;
+    final: string;
+    live: string;
   };
   featuresAria: string;
   features: Feature[];
@@ -95,7 +113,12 @@ const languageOptions: LanguageOption[] = [
 
 const authClientUrl = "http://127.0.0.1:5174/";
 const authApiUrl = "http://127.0.0.1:8001";
+const matchesApiUrl = "http://127.0.0.1:8002";
 let currentUser: CurrentUser | null = null;
+let carouselMatches: CarouselMatch[] = [];
+let activeMatchIndex = 0;
+let isMatchesLoading = true;
+let matchesError: string | null = null;
 
 const signOutIcon = `
   <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -200,11 +223,39 @@ const worldCupGroups: WorldCupGroup[] = [
   ])
 ];
 
+const normalizeTeamName = (name: string) =>
+  name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const teamLookup = new Map<string, GroupStanding>();
+
+worldCupGroups.forEach((group) => {
+  group.teams.forEach((team) => {
+    teamLookup.set(normalizeTeamName(team.team.en), team);
+    teamLookup.set(normalizeTeamName(team.team.es), team);
+  });
+});
+
+teamLookup.set(normalizeTeamName("United States"), teamLookup.get(normalizeTeamName("USA")) as GroupStanding);
+teamLookup.set(normalizeTeamName("United States of America"), teamLookup.get(normalizeTeamName("USA")) as GroupStanding);
+teamLookup.set(
+  normalizeTeamName("Bosnia-Herzegovina"),
+  teamLookup.get(normalizeTeamName("Bosnia and Herzegovina")) as GroupStanding
+);
+teamLookup.set(normalizeTeamName("Cote d'Ivoire"), teamLookup.get(normalizeTeamName("Ivory Coast")) as GroupStanding);
+teamLookup.set(normalizeTeamName("Côte d'Ivoire"), teamLookup.get(normalizeTeamName("Ivory Coast")) as GroupStanding);
+teamLookup.set(normalizeTeamName("Korea Republic"), teamLookup.get(normalizeTeamName("South Korea")) as GroupStanding);
+teamLookup.set(normalizeTeamName("Czech Republic"), teamLookup.get(normalizeTeamName("Czechia")) as GroupStanding);
+
 const copy: Record<Language, Copy> = {
   en: {
     brandAria: "World Cup Picks home",
     navAria: "Main navigation",
-    matchAria: "Example match card",
+    matchAria: "World Cup match carousel",
     languageLabel: "Language",
     nav: {
       groups: "Groups",
@@ -222,11 +273,15 @@ const copy: Record<Language, Copy> = {
       joinGroup: "Join with a code"
     },
     match: {
-      stage: "Group Stage",
-      closes: "Prediction closes in 2h 14m",
-      homeTeam: "United States",
-      awayTeam: "Colombia",
-      scoreType: "Exact score"
+      title: "Upcoming matches",
+      loading: "Loading World Cup matches...",
+      error: "Matches are not available right now.",
+      empty: "No World Cup matches found.",
+      previous: "Previous match",
+      next: "Next match",
+      scheduled: "Scheduled",
+      final: "Final",
+      live: "Live"
     },
     featuresAria: "Core features",
     features: [
@@ -258,7 +313,7 @@ const copy: Record<Language, Copy> = {
   es: {
     brandAria: "Inicio de World Cup Picks",
     navAria: "Navegación principal",
-    matchAria: "Tarjeta de partido de ejemplo",
+    matchAria: "Carrusel de partidos del Mundial",
     languageLabel: "Idioma",
     nav: {
       groups: "Grupos",
@@ -276,11 +331,15 @@ const copy: Record<Language, Copy> = {
       joinGroup: "Unirse con código"
     },
     match: {
-      stage: "Fase de grupos",
-      closes: "El pronóstico cierra en 2h 14m",
-      homeTeam: "Estados Unidos",
-      awayTeam: "Colombia",
-      scoreType: "Marcador exacto"
+      title: "Próximos partidos",
+      loading: "Cargando partidos del Mundial...",
+      error: "Los partidos no están disponibles en este momento.",
+      empty: "No se encontraron partidos del Mundial.",
+      previous: "Partido anterior",
+      next: "Siguiente partido",
+      scheduled: "Programado",
+      final: "Final",
+      live: "En vivo"
     },
     featuresAria: "Funciones principales",
     features: [
@@ -326,6 +385,120 @@ const getCurrentPage = () =>
   document.body.dataset.page === "groups" || window.location.pathname.endsWith("/groups.html")
     ? "groups"
     : "home";
+
+const getTeamStanding = (teamName: string) => teamLookup.get(normalizeTeamName(teamName));
+
+const renderTeamBadge = (teamName: string, language: Language) => {
+  const team = getTeamStanding(teamName);
+
+  if (!team) {
+    return `<span class="match-team-code" aria-hidden="true">${teamName.slice(0, 3).toUpperCase()}</span>`;
+  }
+
+  return `<img class="match-team-flag" src="${team.flagSrc}" alt="${team.flagAlt[language]}" />`;
+};
+
+const getTeamDisplayName = (teamName: string, language: Language) => {
+  const team = getTeamStanding(teamName);
+
+  return team ? team.team[language] : teamName;
+};
+
+const formatMatchDate = (utcDate: string, language: Language) => {
+  const date = new Date(utcDate);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat(language === "es" ? "es-CO" : "en-US", {
+    timeZone: "America/Bogota",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short"
+  }).format(date);
+};
+
+const getMatchStatusLabel = (status: string, selectedCopy: Copy) => {
+  if (status === "FINISHED") return selectedCopy.match.final;
+  if (status === "IN_PLAY" || status === "PAUSED") return selectedCopy.match.live;
+
+  return selectedCopy.match.scheduled;
+};
+
+const getVisibleMatch = () => carouselMatches[activeMatchIndex] ?? carouselMatches[0];
+
+const renderMatchCarousel = (selectedCopy: Copy, language: Language) => {
+  if (isMatchesLoading) {
+    return `
+      <aside class="match-preview match-carousel" aria-label="${selectedCopy.matchAria}">
+        <div class="match-empty-state">${selectedCopy.match.loading}</div>
+      </aside>
+    `;
+  }
+
+  if (matchesError) {
+    return `
+      <aside class="match-preview match-carousel" aria-label="${selectedCopy.matchAria}">
+        <div class="match-empty-state">${selectedCopy.match.error}</div>
+      </aside>
+    `;
+  }
+
+  const match = getVisibleMatch();
+
+  if (!match) {
+    return `
+      <aside class="match-preview match-carousel" aria-label="${selectedCopy.matchAria}">
+        <div class="match-empty-state">${selectedCopy.match.empty}</div>
+      </aside>
+    `;
+  }
+
+  const hasScore = match.score.home !== null && match.score.away !== null;
+  const matchDate = formatMatchDate(match.utcDate, language);
+
+  return `
+    <aside class="match-preview match-carousel" aria-label="${selectedCopy.matchAria}">
+      <div class="match-preview-header">
+        <span>${selectedCopy.match.title}</span>
+        <strong>${getMatchStatusLabel(match.status, selectedCopy)}</strong>
+      </div>
+      <div class="match-meta">
+        <span>${match.group ?? match.stage}</span>
+        <strong>${matchDate}</strong>
+      </div>
+      <div class="teams">
+        <div class="team-row">
+          ${renderTeamBadge(match.homeTeam, language)}
+          <span>${getTeamDisplayName(match.homeTeam, language)}</span>
+          <strong>${hasScore ? match.score.home : "–"}</strong>
+        </div>
+        <div class="team-row">
+          ${renderTeamBadge(match.awayTeam, language)}
+          <span>${getTeamDisplayName(match.awayTeam, language)}</span>
+          <strong>${hasScore ? match.score.away : "–"}</strong>
+        </div>
+      </div>
+      <div class="carousel-controls">
+        <button class="carousel-button" type="button" data-carousel-action="previous" aria-label="${selectedCopy.match.previous}">
+          ‹
+        </button>
+        <div class="carousel-dots" aria-hidden="true">
+          ${carouselMatches
+            .map((_, index) => `<span class="carousel-dot${index === activeMatchIndex ? " is-active" : ""}"></span>`)
+            .join("")}
+        </div>
+        <button class="carousel-button" type="button" data-carousel-action="next" aria-label="${selectedCopy.match.next}">
+          ›
+        </button>
+      </div>
+    </aside>
+  `;
+};
 
 const renderStandings = (selectedCopy: Copy, language: Language) => `
   <section class="groups-section" id="groups" aria-label="${selectedCopy.standings.aria}">
@@ -452,7 +625,7 @@ const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | und
   </header>
 `;
 
-const renderHomePage = (selectedCopy: Copy) => `
+const renderHomePage = (selectedCopy: Copy, language: Language) => `
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-copy">
       <p class="eyebrow">${selectedCopy.eyebrow}</p>
@@ -466,28 +639,7 @@ const renderHomePage = (selectedCopy: Copy) => `
       </div>
     </div>
 
-    <aside class="match-preview" aria-label="${selectedCopy.matchAria}">
-      <div class="match-preview-header">
-        <span>${selectedCopy.match.stage}</span>
-        <strong>${selectedCopy.match.closes}</strong>
-      </div>
-      <div class="teams">
-        <div class="team-row">
-          <span class="flag">USA</span>
-          <span>${selectedCopy.match.homeTeam}</span>
-          <strong>2</strong>
-        </div>
-        <div class="team-row">
-          <span class="flag">COL</span>
-          <span>${selectedCopy.match.awayTeam}</span>
-          <strong>1</strong>
-        </div>
-      </div>
-      <div class="score-breakdown">
-        <span>${selectedCopy.match.scoreType}</span>
-        <strong>+5 pts</strong>
-      </div>
-    </aside>
+    ${renderMatchCarousel(selectedCopy, language)}
   </section>
 
   <section class="feature-grid" aria-label="${selectedCopy.featuresAria}">
@@ -514,7 +666,7 @@ const render = (language: Language) => {
   app.innerHTML = `
   <section class="page-shell">
     ${renderTopbar(selectedCopy, selectedLanguage, language)}
-    ${currentPage === "groups" ? renderStandings(selectedCopy, language) : renderHomePage(selectedCopy)}
+    ${currentPage === "groups" ? renderStandings(selectedCopy, language) : renderHomePage(selectedCopy, language)}
   </section>
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
@@ -525,6 +677,7 @@ const render = (language: Language) => {
   const accountTrigger = document.querySelector<HTMLButtonElement>("#account-trigger");
   const accountMenu = document.querySelector<HTMLDivElement>("#account-menu");
   const signOutButton = document.querySelector<HTMLButtonElement>("#signout-button");
+  const carouselButtons = document.querySelectorAll<HTMLButtonElement>("[data-carousel-action]");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -594,6 +747,18 @@ const render = (language: Language) => {
       render(getStoredLanguage());
     }
   });
+
+  carouselButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (carouselMatches.length === 0) {
+        return;
+      }
+
+      const direction = button.dataset.carouselAction === "previous" ? -1 : 1;
+      activeMatchIndex = (activeMatchIndex + direction + carouselMatches.length) % carouselMatches.length;
+      render(getStoredLanguage());
+    });
+  });
 };
 
 const loadCurrentUser = async () => {
@@ -614,5 +779,31 @@ const loadCurrentUser = async () => {
   }
 };
 
+const loadCarouselMatches = async () => {
+  isMatchesLoading = true;
+  matchesError = null;
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${matchesApiUrl}/matches/carousel`);
+
+    if (!response.ok) {
+      throw new Error("Could not load matches.");
+    }
+
+    const result = (await response.json()) as { matches?: CarouselMatch[] };
+    carouselMatches = Array.isArray(result.matches) ? result.matches : [];
+    activeMatchIndex = 0;
+  } catch {
+    carouselMatches = [];
+    activeMatchIndex = 0;
+    matchesError = "unavailable";
+  } finally {
+    isMatchesLoading = false;
+    render(getStoredLanguage());
+  }
+};
+
 render(getStoredLanguage());
 void loadCurrentUser();
+void loadCarouselMatches();

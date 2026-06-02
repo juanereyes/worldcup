@@ -89,7 +89,10 @@ img {
 .hero-actions,
 .team-row,
 .match-preview-header,
-.score-breakdown {
+.score-breakdown,
+.match-meta,
+.carousel-controls,
+.carousel-dots {
   align-items: center;
   display: flex;
 }
@@ -319,7 +322,9 @@ h1 {
 }
 
 .match-preview-header,
-.score-breakdown {
+.score-breakdown,
+.match-meta,
+.carousel-controls {
   justify-content: space-between;
 }
 
@@ -334,6 +339,19 @@ h1 {
 .match-preview-header strong {
   color: var(--blue);
   font-size: 0.78rem;
+}
+
+.match-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  gap: 16px;
+  padding-top: 14px;
+}
+
+.match-meta strong {
+  color: var(--ink);
+  font-size: 0.82rem;
+  text-align: right;
 }
 
 .teams {
@@ -360,6 +378,29 @@ h1 {
   padding: 8px;
 }
 
+.match-team-flag,
+.match-team-code {
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(32, 37, 43, 0.1);
+  flex: 0 0 34px;
+  height: 22px;
+  width: 34px;
+}
+
+.match-team-flag {
+  object-fit: cover;
+}
+
+.match-team-code {
+  align-items: center;
+  background: #fff;
+  color: var(--green-dark);
+  display: inline-flex;
+  font-size: 0.68rem;
+  font-weight: 850;
+  justify-content: center;
+}
+
 .team-row span:nth-child(2) {
   flex: 1;
   font-weight: 750;
@@ -375,6 +416,60 @@ h1 {
   border-radius: 8px;
   color: #fff;
   padding: 14px;
+}
+
+.carousel-controls {
+  border-top: 1px solid var(--line);
+  gap: 14px;
+  padding-top: 16px;
+}
+
+.carousel-button {
+  align-items: center;
+  aspect-ratio: 1;
+  background: #e9efe8;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--green-dark);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 1.25rem;
+  font-weight: 850;
+  justify-content: center;
+  line-height: 1;
+  width: 36px;
+}
+
+.carousel-button:hover,
+.carousel-button:focus-visible {
+  border-color: #c7d1c5;
+  box-shadow: 0 0 0 3px rgba(15, 107, 79, 0.12);
+  outline: none;
+}
+
+.carousel-dots {
+  gap: 6px;
+  justify-content: center;
+}
+
+.carousel-dot {
+  background: #cfd8cc;
+  border-radius: 999px;
+  height: 7px;
+  width: 7px;
+}
+
+.carousel-dot.is-active {
+  background: var(--green);
+  width: 18px;
+}
+
+.match-empty-state {
+  color: var(--muted);
+  font-weight: 750;
+  line-height: 1.5;
+  min-height: 180px;
+  padding: 28px 0;
 }
 
 .feature-grid {
