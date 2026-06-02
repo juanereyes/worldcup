@@ -18,4 +18,4 @@ Current API:
 
 - `GET /health` returns service health.
 - `GET /matches/carousel` returns the World Cup matches for the carousel window.
-
+- `GET /matches` returns all cached World Cup matches.

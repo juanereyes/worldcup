@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from matches_service.football_data import (
     ConfigurationError,
     FootballDataError,
+    all_matches_payload,
     carousel_payload,
     load_env_file,
 )
@@ -35,15 +36,21 @@ class MatchesRequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, {"status": "ok"})
             return
 
+        if parsed.path == "/matches":
+            self.send_matches_payload(all_matches_payload)
+            return
+
         if parsed.path != "/matches/carousel":
             self.send_json(404, {"error": "Not found."})
             return
 
         query = parse_qs(parsed.query)
         today = self.parse_today(query.get("today", [None])[0])
+        self.send_matches_payload(lambda: carousel_payload(today=today))
 
+    def send_matches_payload(self, payload_factory: Any) -> None:
         try:
-            self.send_json(200, carousel_payload(today=today))
+            self.send_json(200, payload_factory())
         except ConfigurationError as error:
             self.send_json(500, {"error": str(error)})
         except FootballDataError as error:

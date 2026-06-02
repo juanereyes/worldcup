@@ -37,6 +37,8 @@ type CurrentUser = {
   displayName: string;
 };
 
+type Page = "home" | "groups" | "matches";
+
 type CarouselMatch = {
   id: number;
   utcDate: string;
@@ -94,6 +96,14 @@ type Copy = {
     goalsScored: string;
     goalsAgainst: string;
   };
+  matchesPage: {
+    title: string;
+    aria: string;
+    loading: string;
+    error: string;
+    empty: string;
+    allMatches: string;
+  };
 };
 
 const languageOptions: LanguageOption[] = [
@@ -116,9 +126,12 @@ const authApiUrl = "http://127.0.0.1:8001";
 const matchesApiUrl = "http://127.0.0.1:8002";
 let currentUser: CurrentUser | null = null;
 let carouselMatches: CarouselMatch[] = [];
+let allMatches: CarouselMatch[] = [];
 let activeMatchIndex = 0;
 let isMatchesLoading = true;
+let isAllMatchesLoading = false;
 let matchesError: string | null = null;
+let allMatchesError: string | null = null;
 
 const signOutIcon = `
   <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -308,6 +321,14 @@ const copy: Record<Language, Copy> = {
       goalDifference: "GD",
       goalsScored: "GF",
       goalsAgainst: "GA"
+    },
+    matchesPage: {
+      title: "World Cup matches",
+      aria: "World Cup matches and scores",
+      loading: "Loading matches...",
+      error: "Matches are not available right now.",
+      empty: "No matches found.",
+      allMatches: "All matches"
     }
   },
   es: {
@@ -366,6 +387,14 @@ const copy: Record<Language, Copy> = {
       goalDifference: "DG",
       goalsScored: "GF",
       goalsAgainst: "GC"
+    },
+    matchesPage: {
+      title: "Partidos del Mundial",
+      aria: "Partidos y marcadores del Mundial",
+      loading: "Cargando partidos...",
+      error: "Los partidos no están disponibles en este momento.",
+      empty: "No se encontraron partidos.",
+      allMatches: "Todos los partidos"
     }
   }
 };
@@ -381,10 +410,17 @@ const getStoredLanguage = (): Language => {
   return language === "es" ? "es" : "en";
 };
 
-const getCurrentPage = () =>
-  document.body.dataset.page === "groups" || window.location.pathname.endsWith("/groups.html")
-    ? "groups"
-    : "home";
+const getCurrentPage = (): Page => {
+  if (document.body.dataset.page === "groups" || window.location.pathname.endsWith("/groups.html")) {
+    return "groups";
+  }
+
+  if (document.body.dataset.page === "matches" || window.location.pathname.endsWith("/matches.html")) {
+    return "matches";
+  }
+
+  return "home";
+};
 
 const getTeamStanding = (teamName: string) => teamLookup.get(normalizeTeamName(teamName));
 
@@ -404,7 +440,31 @@ const getTeamDisplayName = (teamName: string, language: Language) => {
   return team ? team.team[language] : teamName;
 };
 
+const formatBogotaTime = (date: Date, language: Language) =>
+  `${new Intl.DateTimeFormat(language === "es" ? "es-CO" : "en-US", {
+    timeZone: "America/Bogota",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date)} GMT-5`;
+
 const formatMatchDate = (utcDate: string, language: Language) => {
+  const date = new Date(utcDate);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const day = new Intl.DateTimeFormat(language === "es" ? "es-CO" : "en-US", {
+    timeZone: "America/Bogota",
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  }).format(date);
+
+  return `${day}, ${formatBogotaTime(date, language)}`;
+};
+
+const formatMatchDay = (utcDate: string, language: Language) => {
   const date = new Date(utcDate);
 
   if (Number.isNaN(date.getTime())) {
@@ -413,13 +473,39 @@ const formatMatchDate = (utcDate: string, language: Language) => {
 
   return new Intl.DateTimeFormat(language === "es" ? "es-CO" : "en-US", {
     timeZone: "America/Bogota",
-    weekday: "short",
-    month: "short",
+    weekday: "long",
+    month: "long",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short"
+    year: "numeric"
   }).format(date);
+};
+
+const getMatchDayKey = (utcDate: string) => {
+  const date = new Date(utcDate);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const getPart = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+
+  return `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
+};
+
+const getMatchTime = (utcDate: string, language: Language) => {
+  const date = new Date(utcDate);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return formatBogotaTime(date, language);
 };
 
 const getMatchStatusLabel = (status: string, selectedCopy: Copy) => {
@@ -427,6 +513,26 @@ const getMatchStatusLabel = (status: string, selectedCopy: Copy) => {
   if (status === "IN_PLAY" || status === "PAUSED") return selectedCopy.match.live;
 
   return selectedCopy.match.scheduled;
+};
+
+const localizeMatchLabel = (label: string | null, language: Language) => {
+  if (!label) {
+    return "";
+  }
+
+  if (language === "en") {
+    return label;
+  }
+
+  if (label.startsWith("Group ")) {
+    return label.replace("Group", "Grupo");
+  }
+
+  if (label === "Group Stage") {
+    return "Fase de grupos";
+  }
+
+  return label;
 };
 
 const getVisibleMatch = () => carouselMatches[activeMatchIndex] ?? carouselMatches[0];
@@ -500,6 +606,89 @@ const renderMatchCarousel = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const renderMatchListItem = (match: CarouselMatch, selectedCopy: Copy, language: Language) => {
+  const hasScore = match.score.home !== null && match.score.away !== null;
+  const status = getMatchStatusLabel(match.status, selectedCopy);
+  const matchLabel = localizeMatchLabel(match.group ?? match.stage, language);
+
+  return `
+    <article class="match-list-card">
+      <div class="match-list-meta">
+        <span>${getMatchTime(match.utcDate, language)}</span>
+        <strong>${status}</strong>
+      </div>
+      <div class="match-list-teams">
+        <div class="match-list-team">
+          ${renderTeamBadge(match.homeTeam, language)}
+          <span>${getTeamDisplayName(match.homeTeam, language)}</span>
+        </div>
+        <div class="match-score">
+          <strong>${hasScore ? match.score.home : "–"}</strong>
+          <span>:</span>
+          <strong>${hasScore ? match.score.away : "–"}</strong>
+        </div>
+        <div class="match-list-team match-list-team-away">
+          <span>${getTeamDisplayName(match.awayTeam, language)}</span>
+          ${renderTeamBadge(match.awayTeam, language)}
+        </div>
+      </div>
+      <div class="match-list-footer">
+        <span>${matchLabel}</span>
+      </div>
+    </article>
+  `;
+};
+
+const renderMatchesPage = (selectedCopy: Copy, language: Language) => {
+  const groupedMatches = allMatches.reduce<Record<string, CarouselMatch[]>>((groups, match) => {
+    const key = getMatchDayKey(match.utcDate);
+
+    if (!key) {
+      return groups;
+    }
+
+    groups[key] = groups[key] ? [...groups[key], match] : [match];
+    return groups;
+  }, {});
+  const dayKeys = Object.keys(groupedMatches).sort();
+
+  return `
+    <section class="matches-section" id="matches" aria-label="${selectedCopy.matchesPage.aria}">
+      <div class="section-heading">
+        <p class="eyebrow">FIFA World Cup 2026</p>
+        <h2>${selectedCopy.matchesPage.title}</h2>
+      </div>
+      ${
+        isAllMatchesLoading
+          ? `<div class="matches-state">${selectedCopy.matchesPage.loading}</div>`
+          : allMatchesError
+            ? `<div class="matches-state">${selectedCopy.matchesPage.error}</div>`
+            : dayKeys.length === 0
+              ? `<div class="matches-state">${selectedCopy.matchesPage.empty}</div>`
+              : `
+                <div class="matches-list" aria-label="${selectedCopy.matchesPage.allMatches}">
+                  ${dayKeys
+                    .map((dayKey) => {
+                      const matches = groupedMatches[dayKey];
+                      const firstMatch = matches[0];
+
+                      return `
+                        <section class="match-day">
+                          <h3>${formatMatchDay(firstMatch.utcDate, language)}</h3>
+                          <div class="match-day-grid">
+                            ${matches.map((match) => renderMatchListItem(match, selectedCopy, language)).join("")}
+                          </div>
+                        </section>
+                      `;
+                    })
+                    .join("")}
+                </div>
+              `
+      }
+    </section>
+  `;
+};
+
 const renderStandings = (selectedCopy: Copy, language: Language) => `
   <section class="groups-section" id="groups" aria-label="${selectedCopy.standings.aria}">
     <div class="section-heading">
@@ -564,7 +753,7 @@ const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | und
     <nav class="nav-links" aria-label="${selectedCopy.navAria}">
       <a href="/groups.html">${selectedCopy.nav.groups}</a>
       <a href="/#scoring">${selectedCopy.nav.scoring}</a>
-      <a href="/#matches">${selectedCopy.nav.matches}</a>
+      <a href="/matches.html">${selectedCopy.nav.matches}</a>
     </nav>
     <div class="topbar-actions">
       <div class="language-control">
@@ -660,13 +849,18 @@ const render = (language: Language) => {
   const selectedCopy = copy[language];
   const selectedLanguage = languageOptions.find((option) => option.code === language);
   const currentPage = getCurrentPage();
+  const pageContent = {
+    groups: renderStandings(selectedCopy, language),
+    home: renderHomePage(selectedCopy, language),
+    matches: renderMatchesPage(selectedCopy, language)
+  }[currentPage];
 
   document.documentElement.lang = language;
 
   app.innerHTML = `
   <section class="page-shell">
     ${renderTopbar(selectedCopy, selectedLanguage, language)}
-    ${currentPage === "groups" ? renderStandings(selectedCopy, language) : renderHomePage(selectedCopy, language)}
+    ${pageContent}
   </section>
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
@@ -804,6 +998,34 @@ const loadCarouselMatches = async () => {
   }
 };
 
+const loadAllMatches = async () => {
+  if (getCurrentPage() !== "matches") {
+    return;
+  }
+
+  isAllMatchesLoading = true;
+  allMatchesError = null;
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${matchesApiUrl}/matches`);
+
+    if (!response.ok) {
+      throw new Error("Could not load matches.");
+    }
+
+    const result = (await response.json()) as { matches?: CarouselMatch[] };
+    allMatches = Array.isArray(result.matches) ? result.matches : [];
+  } catch {
+    allMatches = [];
+    allMatchesError = "unavailable";
+  } finally {
+    isAllMatchesLoading = false;
+    render(getStoredLanguage());
+  }
+};
+
 render(getStoredLanguage());
 void loadCurrentUser();
 void loadCarouselMatches();
+void loadAllMatches();

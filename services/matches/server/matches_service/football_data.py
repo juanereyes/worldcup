@@ -276,3 +276,20 @@ def carousel_payload(today: date | None = None) -> dict[str, Any]:
         "days": days,
         "matches": normalized,
     }
+
+
+def all_matches_payload() -> dict[str, Any]:
+    matches = get_world_cup_matches()
+    normalized = [normalize_match(match).to_payload() for match in matches]
+    days = sorted({
+        day.isoformat()
+        for match in matches
+        if (day := match_date(match)) is not None
+    })
+
+    return {
+        "competition": COMPETITION_CODE,
+        "season": SEASON,
+        "days": days,
+        "matches": normalized,
+    }
