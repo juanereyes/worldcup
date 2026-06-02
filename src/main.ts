@@ -23,6 +23,11 @@ type WorldCupGroup = {
   teams: GroupStanding[];
 };
 
+type GroupStandingStats = Pick<
+  GroupStanding,
+  "played" | "points" | "goalDifference" | "goalsScored" | "goalsAgainst"
+>;
+
 type LanguageOption = {
   code: Language;
   label: string;
@@ -132,6 +137,14 @@ let isMatchesLoading = true;
 let isAllMatchesLoading = false;
 let matchesError: string | null = null;
 let allMatchesError: string | null = null;
+
+const emptyStandingStats = (): GroupStandingStats => ({
+  played: 0,
+  points: 0,
+  goalDifference: 0,
+  goalsScored: 0,
+  goalsAgainst: 0
+});
 
 const signOutIcon = `
   <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -263,6 +276,59 @@ teamLookup.set(normalizeTeamName("Cote d'Ivoire"), teamLookup.get(normalizeTeamN
 teamLookup.set(normalizeTeamName("Côte d'Ivoire"), teamLookup.get(normalizeTeamName("Ivory Coast")) as GroupStanding);
 teamLookup.set(normalizeTeamName("Korea Republic"), teamLookup.get(normalizeTeamName("South Korea")) as GroupStanding);
 teamLookup.set(normalizeTeamName("Czech Republic"), teamLookup.get(normalizeTeamName("Czechia")) as GroupStanding);
+teamLookup.set(normalizeTeamName("Turkey"), teamLookup.get(normalizeTeamName("Türkiye")) as GroupStanding);
+teamLookup.set(normalizeTeamName("Cape Verde Islands"), teamLookup.get(normalizeTeamName("Cape Verde")) as GroupStanding);
+teamLookup.set(normalizeTeamName("Congo DR"), teamLookup.get(normalizeTeamName("DR Congo")) as GroupStanding);
+
+const getStandingKey = (teamName: string) => normalizeTeamName(teamName);
+
+const addMatchResult = (
+  standings: Map<string, GroupStandingStats>,
+  teamName: string,
+  goalsFor: number,
+  goalsAgainst: number
+) => {
+  const team = getTeamStanding(teamName);
+
+  if (!team) {
+    return;
+  }
+
+  const key = getStandingKey(team.team.en);
+  const current = standings.get(key) ?? emptyStandingStats();
+  const resultPoints = goalsFor > goalsAgainst ? 3 : goalsFor === goalsAgainst ? 1 : 0;
+
+  standings.set(key, {
+    played: current.played + 1,
+    points: current.points + resultPoints,
+    goalDifference: current.goalDifference + goalsFor - goalsAgainst,
+    goalsScored: current.goalsScored + goalsFor,
+    goalsAgainst: current.goalsAgainst + goalsAgainst
+  });
+};
+
+const getComputedStandings = () => {
+  const standings = new Map<string, GroupStandingStats>();
+
+  allMatches.forEach((match) => {
+    if (
+      match.status !== "FINISHED" ||
+      match.stage !== "Group Stage" ||
+      match.score.home === null ||
+      match.score.away === null
+    ) {
+      return;
+    }
+
+    addMatchResult(standings, match.homeTeam, match.score.home, match.score.away);
+    addMatchResult(standings, match.awayTeam, match.score.away, match.score.home);
+  });
+
+  return standings;
+};
+
+const getStandingStats = (standings: Map<string, GroupStandingStats>, standing: GroupStanding) =>
+  standings.get(getStandingKey(standing.team.en)) ?? emptyStandingStats();
 
 const copy: Record<Language, Copy> = {
   en: {
@@ -689,16 +755,34 @@ const renderMatchesPage = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
-const renderStandings = (selectedCopy: Copy, language: Language) => `
-  <section class="groups-section" id="groups" aria-label="${selectedCopy.standings.aria}">
-    <div class="section-heading">
-      <p class="eyebrow">FIFA World Cup 2026</p>
-      <h2>${selectedCopy.standings.title}</h2>
-    </div>
-    <div class="groups-grid">
-      ${worldCupGroups
-        .map(
-          (group) => `
+const renderStandings = (selectedCopy: Copy, language: Language) => {
+  const standings = getComputedStandings();
+
+  return `
+    <section class="groups-section" id="groups" aria-label="${selectedCopy.standings.aria}">
+      <div class="section-heading">
+        <p class="eyebrow">FIFA World Cup 2026</p>
+        <h2>${selectedCopy.standings.title}</h2>
+      </div>
+      <div class="groups-grid">
+        ${worldCupGroups
+          .map((group) => {
+            const sortedTeams = group.teams
+              .map((standing, index) => ({
+                index,
+                standing,
+                stats: getStandingStats(standings, standing)
+              }))
+              .sort((a, b) => {
+                if (b.stats.points !== a.stats.points) return b.stats.points - a.stats.points;
+                if (b.stats.goalDifference !== a.stats.goalDifference) {
+                  return b.stats.goalDifference - a.stats.goalDifference;
+                }
+                if (b.stats.goalsScored !== a.stats.goalsScored) return b.stats.goalsScored - a.stats.goalsScored;
+                return a.index - b.index;
+              });
+
+            return `
             <article class="group-card">
               <h3>${selectedCopy.standings.groupLabel(group.letter)}</h3>
               <div class="standings-table-wrap">
@@ -714,9 +798,9 @@ const renderStandings = (selectedCopy: Copy, language: Language) => `
                     </tr>
                   </thead>
                   <tbody>
-                    ${group.teams
+                    ${sortedTeams
                       .map(
-                        (standing) => `
+                        ({ standing, stats }) => `
                           <tr>
                             <th scope="row">
                               <span class="team-name">
@@ -724,11 +808,11 @@ const renderStandings = (selectedCopy: Copy, language: Language) => `
                                 <span>${standing.team[language]}</span>
                               </span>
                             </th>
-                            <td>${standing.played}</td>
-                            <td class="points-column">${standing.points}</td>
-                            <td>${standing.goalDifference}</td>
-                            <td>${standing.goalsScored}</td>
-                            <td>${standing.goalsAgainst}</td>
+                            <td>${stats.played}</td>
+                            <td class="points-column">${stats.points}</td>
+                            <td>${stats.goalDifference}</td>
+                            <td>${stats.goalsScored}</td>
+                            <td>${stats.goalsAgainst}</td>
                           </tr>
                         `
                       )
@@ -737,12 +821,13 @@ const renderStandings = (selectedCopy: Copy, language: Language) => `
                 </table>
               </div>
             </article>
-          `
-        )
-        .join("")}
-    </div>
-  </section>
-`;
+          `;
+          })
+          .join("")}
+      </div>
+    </section>
+  `;
+};
 
 const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | undefined, language: Language) => `
   <header class="topbar" aria-label="${selectedCopy.navAria}">
@@ -999,7 +1084,9 @@ const loadCarouselMatches = async () => {
 };
 
 const loadAllMatches = async () => {
-  if (getCurrentPage() !== "matches") {
+  const currentPage = getCurrentPage();
+
+  if (currentPage !== "matches" && currentPage !== "groups") {
     return;
   }
 
