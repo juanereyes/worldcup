@@ -42,7 +42,7 @@ type CurrentUser = {
   displayName: string;
 };
 
-type Page = "home" | "groups" | "matches" | "bracket";
+type Page = "home" | "groups" | "matches" | "bracket" | "lobby";
 
 type CarouselMatch = {
   id: number;
@@ -56,6 +56,25 @@ type CarouselMatch = {
     home: number | null;
     away: number | null;
   };
+};
+
+type LobbyMember = {
+  userId: number;
+  username: string;
+  role: "admin" | "member";
+};
+
+type Lobby = {
+  code: string;
+  name: string;
+  members: LobbyMember[];
+};
+
+type JoinLobbyModalState = {
+  isOpen: boolean;
+  code: string;
+  message: string | null;
+  isSubmitting: boolean;
 };
 
 type Copy = {
@@ -116,6 +135,29 @@ type Copy = {
     error: string;
     empty: string;
   };
+  lobbyPage: {
+    title: string;
+    aria: string;
+    loading: string;
+    error: string;
+    empty: string;
+    missingCode: string;
+    members: string;
+    admin: string;
+    groupCode: string;
+  };
+  lobbyActions: {
+    joinTitle: string;
+    codeLabel: string;
+    codePlaceholder: string;
+    submit: string;
+    cancel: string;
+    invalidCode: string;
+    createError: string;
+    joinError: string;
+    alreadyInGroup: string;
+    notFound: string;
+  };
 };
 
 const languageOptions: LanguageOption[] = [
@@ -136,14 +178,24 @@ const languageOptions: LanguageOption[] = [
 const authClientUrl = "http://127.0.0.1:5174/";
 const authApiUrl = "http://127.0.0.1:8001";
 const matchesApiUrl = "http://127.0.0.1:8002";
+const lobbiesApiUrl = "http://127.0.0.1:8003";
 let currentUser: CurrentUser | null = null;
 let carouselMatches: CarouselMatch[] = [];
 let allMatches: CarouselMatch[] = [];
+let currentLobby: Lobby | null = null;
 let activeMatchIndex = 0;
 let isMatchesLoading = true;
 let isAllMatchesLoading = false;
+let isLobbyLoading = false;
 let matchesError: string | null = null;
 let allMatchesError: string | null = null;
+let lobbyError: string | null = null;
+let joinLobbyModal: JoinLobbyModalState = {
+  isOpen: false,
+  code: "",
+  message: null,
+  isSubmitting: false
+};
 
 const emptyStandingStats = (): GroupStandingStats => ({
   played: 0,
@@ -409,6 +461,29 @@ const copy: Record<Language, Copy> = {
       loading: "Loading bracket...",
       error: "The bracket is not available right now.",
       empty: "No knockout matches found."
+    },
+    lobbyPage: {
+      title: "Lobby",
+      aria: "Prediction lobby members",
+      loading: "Loading lobby...",
+      error: "This lobby is not available right now.",
+      empty: "No members are in this lobby yet.",
+      missingCode: "Open a lobby with a code in the URL.",
+      members: "Members",
+      admin: "Admin",
+      groupCode: "Group code"
+    },
+    lobbyActions: {
+      joinTitle: "Join a group",
+      codeLabel: "Group code",
+      codePlaceholder: "ABCD",
+      submit: "Join group",
+      cancel: "Cancel",
+      invalidCode: "Enter a valid 4-character lobby code.",
+      createError: "Could not create the lobby right now.",
+      joinError: "Could not join that lobby right now.",
+      alreadyInGroup: "You are already in this group.",
+      notFound: "That group cannot be found."
     }
   },
   es: {
@@ -482,6 +557,29 @@ const copy: Record<Language, Copy> = {
       loading: "Cargando llaves...",
       error: "Las llaves no están disponibles en este momento.",
       empty: "No se encontraron partidos de eliminación directa."
+    },
+    lobbyPage: {
+      title: "Lobby",
+      aria: "Miembros del lobby de pronósticos",
+      loading: "Cargando lobby...",
+      error: "Este lobby no está disponible en este momento.",
+      empty: "Todavía no hay miembros en este lobby.",
+      missingCode: "Abre un lobby con un código en la URL.",
+      members: "Miembros",
+      admin: "Admin",
+      groupCode: "Código del grupo"
+    },
+    lobbyActions: {
+      joinTitle: "Unirse a un grupo",
+      codeLabel: "Código del grupo",
+      codePlaceholder: "ABCD",
+      submit: "Unirse al grupo",
+      cancel: "Cancelar",
+      invalidCode: "Ingresa un código de lobby válido de 4 caracteres.",
+      createError: "No se pudo crear el lobby en este momento.",
+      joinError: "No se pudo unir a ese lobby en este momento.",
+      alreadyInGroup: "Ya estás en este grupo.",
+      notFound: "No se pudo encontrar ese grupo."
     }
   }
 };
@@ -510,7 +608,17 @@ const getCurrentPage = (): Page => {
     return "bracket";
   }
 
+  if (document.body.dataset.page === "lobby" || window.location.pathname.endsWith("/lobby.html")) {
+    return "lobby";
+  }
+
   return "home";
+};
+
+const getLobbyCodeFromUrl = () => {
+  const code = new URLSearchParams(window.location.search).get("code") ?? "";
+
+  return code.trim().toUpperCase();
 };
 
 const getTeamStanding = (teamName: string) => teamLookup.get(normalizeTeamName(teamName));
@@ -936,6 +1044,105 @@ const renderBracketPage = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const renderLobbyPage = (selectedCopy: Copy) => {
+  const lobbyCode = getLobbyCodeFromUrl();
+
+  return `
+    <section class="lobby-section" id="lobby" aria-label="${selectedCopy.lobbyPage.aria}">
+      <div class="section-heading">
+        <p class="eyebrow">FIFA World Cup 2026</p>
+        <h2>${currentLobby?.name ?? selectedCopy.lobbyPage.title}</h2>
+      </div>
+      ${
+        !lobbyCode
+          ? `<div class="matches-state">${selectedCopy.lobbyPage.missingCode}</div>`
+          : isLobbyLoading
+            ? `<div class="matches-state">${selectedCopy.lobbyPage.loading}</div>`
+            : lobbyError
+              ? `<div class="matches-state">${selectedCopy.lobbyPage.error}</div>`
+              : currentLobby
+                ? `
+                  <article class="lobby-card">
+                    <div class="lobby-card-header">
+                      <span>${selectedCopy.lobbyPage.members}</span>
+                      <span class="lobby-code">
+                        <span>${selectedCopy.lobbyPage.groupCode}</span>
+                        <strong>${currentLobby.code}</strong>
+                      </span>
+                    </div>
+                    ${
+                      currentLobby.members.length === 0
+                        ? `<div class="lobby-empty">${selectedCopy.lobbyPage.empty}</div>`
+                        : `
+                          <ul class="lobby-member-list">
+                            ${currentLobby.members
+                              .map(
+                                (member) => `
+                                  <li class="lobby-member">
+                                    <span>${member.username}</span>
+                                    ${
+                                      member.role === "admin"
+                                        ? `<strong>${selectedCopy.lobbyPage.admin}</strong>`
+                                        : ""
+                                    }
+                                  </li>
+                                `
+                              )
+                              .join("")}
+                          </ul>
+                        `
+                    }
+                  </article>
+                `
+                : `<div class="matches-state">${selectedCopy.lobbyPage.empty}</div>`
+      }
+    </section>
+  `;
+};
+
+const renderJoinLobbyModal = (selectedCopy: Copy) => {
+  if (!joinLobbyModal.isOpen) {
+    return "";
+  }
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="join-lobby-modal" role="dialog" aria-modal="true" aria-labelledby="join-lobby-title">
+        <form id="join-lobby-form">
+          <div class="modal-header">
+            <h2 id="join-lobby-title">${selectedCopy.lobbyActions.joinTitle}</h2>
+            <button class="modal-close" type="button" id="join-lobby-close" aria-label="${selectedCopy.lobbyActions.cancel}">
+              ×
+            </button>
+          </div>
+          <label class="join-code-field" for="join-lobby-code">
+            <span>${selectedCopy.lobbyActions.codeLabel}</span>
+            <input
+              id="join-lobby-code"
+              name="code"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="${selectedCopy.lobbyActions.codePlaceholder}"
+              value="${joinLobbyModal.code}"
+            />
+          </label>
+          ${joinLobbyModal.message ? `<p class="join-lobby-message">${joinLobbyModal.message}</p>` : ""}
+          <div class="modal-actions">
+            <button class="secondary-action" type="button" id="join-lobby-cancel">
+              ${selectedCopy.lobbyActions.cancel}
+            </button>
+            <button class="primary-action" type="submit" ${joinLobbyModal.isSubmitting ? "disabled" : ""}>
+              ${selectedCopy.lobbyActions.submit}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+};
+
 const renderStandings = (selectedCopy: Copy, language: Language) => {
   const standings = getComputedStandings();
 
@@ -1089,8 +1296,8 @@ const renderHomePage = (selectedCopy: Copy, language: Language) => `
         ${selectedCopy.summary}
       </p>
       <div class="hero-actions">
-        <a class="primary-action" href="#create-group">${selectedCopy.actions.createGroup}</a>
-        <a class="secondary-action" href="#join-group">${selectedCopy.actions.joinGroup}</a>
+        <button class="primary-action" type="button" id="create-lobby-button">${selectedCopy.actions.createGroup}</button>
+        <button class="secondary-action" type="button" id="join-lobby-button">${selectedCopy.actions.joinGroup}</button>
       </div>
     </div>
 
@@ -1119,6 +1326,7 @@ const render = (language: Language) => {
     bracket: renderBracketPage(selectedCopy, language),
     groups: renderStandings(selectedCopy, language),
     home: renderHomePage(selectedCopy, language),
+    lobby: renderLobbyPage(selectedCopy),
     matches: renderMatchesPage(selectedCopy, language)
   }[currentPage];
 
@@ -1129,6 +1337,7 @@ const render = (language: Language) => {
     ${renderTopbar(selectedCopy, selectedLanguage, language)}
     ${pageContent}
   </section>
+  ${renderJoinLobbyModal(selectedCopy)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -1139,6 +1348,12 @@ const render = (language: Language) => {
   const accountMenu = document.querySelector<HTMLDivElement>("#account-menu");
   const signOutButton = document.querySelector<HTMLButtonElement>("#signout-button");
   const carouselButtons = document.querySelectorAll<HTMLButtonElement>("[data-carousel-action]");
+  const createLobbyButton = document.querySelector<HTMLButtonElement>("#create-lobby-button");
+  const joinLobbyButton = document.querySelector<HTMLButtonElement>("#join-lobby-button");
+  const joinLobbyForm = document.querySelector<HTMLFormElement>("#join-lobby-form");
+  const joinLobbyCodeInput = document.querySelector<HTMLInputElement>("#join-lobby-code");
+  const joinLobbyCloseButton = document.querySelector<HTMLButtonElement>("#join-lobby-close");
+  const joinLobbyCancelButton = document.querySelector<HTMLButtonElement>("#join-lobby-cancel");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -1220,6 +1435,40 @@ const render = (language: Language) => {
       render(getStoredLanguage());
     });
   });
+
+  createLobbyButton?.addEventListener("click", () => {
+    void createLobbyFromHome(selectedCopy);
+  });
+
+  joinLobbyButton?.addEventListener("click", () => {
+    void openJoinLobbyModal();
+  });
+
+  joinLobbyCodeInput?.addEventListener("input", () => {
+    joinLobbyModal = {
+      ...joinLobbyModal,
+      code: joinLobbyCodeInput.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 4),
+      message: null
+    };
+    joinLobbyCodeInput.value = joinLobbyModal.code;
+  });
+
+  const closeJoinLobbyModal = () => {
+    joinLobbyModal = {
+      isOpen: false,
+      code: "",
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  joinLobbyCloseButton?.addEventListener("click", closeJoinLobbyModal);
+  joinLobbyCancelButton?.addEventListener("click", closeJoinLobbyModal);
+  joinLobbyForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void joinLobbyFromHome(selectedCopy);
+  });
 };
 
 const loadCurrentUser = async () => {
@@ -1237,6 +1486,163 @@ const loadCurrentUser = async () => {
     render(getStoredLanguage());
   } catch {
     currentUser = null;
+  }
+};
+
+const getAuthenticatedUser = async () => {
+  if (currentUser) {
+    return currentUser;
+  }
+
+  try {
+    const response = await fetch(`${authApiUrl}/session`, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      window.location.href = authClientUrl;
+      return null;
+    }
+
+    const result = (await response.json()) as { user?: CurrentUser };
+    currentUser = result.user ?? null;
+    render(getStoredLanguage());
+  } catch {
+    currentUser = null;
+  }
+
+  if (!currentUser) {
+    window.location.href = authClientUrl;
+  }
+
+  return currentUser;
+};
+
+const createLobbyFromHome = async (selectedCopy: Copy) => {
+  const user = await getAuthenticatedUser();
+
+  if (!user) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        createdByUserId: user.id,
+        createdByUsername: user.username,
+        name: `${user.username}'s World Cup Lobby`
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not create lobby.");
+    }
+
+    const result = (await response.json()) as { lobby?: Lobby };
+
+    if (!result.lobby) {
+      throw new Error("Lobby response was empty.");
+    }
+
+    window.location.href = `/lobby.html?code=${encodeURIComponent(result.lobby.code)}`;
+  } catch {
+    window.alert(selectedCopy.lobbyActions.createError);
+  }
+};
+
+const openJoinLobbyModal = async () => {
+  const user = await getAuthenticatedUser();
+
+  if (!user) {
+    return;
+  }
+
+  joinLobbyModal = {
+    isOpen: true,
+    code: "",
+    message: null,
+    isSubmitting: false
+  };
+  render(getStoredLanguage());
+  document.querySelector<HTMLInputElement>("#join-lobby-code")?.focus();
+};
+
+const joinLobbyFromHome = async (selectedCopy: Copy) => {
+  const user = await getAuthenticatedUser();
+
+  if (!user) {
+    return;
+  }
+
+  const lobbyCode = joinLobbyModal.code.trim().toUpperCase();
+
+  if (!/^[A-Z2-9]{4}$/.test(lobbyCode)) {
+    joinLobbyModal = {
+      ...joinLobbyModal,
+      message: selectedCopy.lobbyActions.invalidCode,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+    return;
+  }
+
+  joinLobbyModal = {
+    ...joinLobbyModal,
+    message: null,
+    isSubmitting: true
+  };
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/members`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        userId: user.id,
+        username: user.username
+      })
+    });
+
+    if (!response.ok) {
+      const result = (await response.json().catch(() => ({}))) as { code?: string };
+
+      if (response.status === 409 && result.code === "already_member") {
+        joinLobbyModal = {
+          ...joinLobbyModal,
+          message: selectedCopy.lobbyActions.alreadyInGroup,
+          isSubmitting: false
+        };
+        render(getStoredLanguage());
+        return;
+      }
+
+      if (response.status === 404 && result.code === "lobby_not_found") {
+        joinLobbyModal = {
+          ...joinLobbyModal,
+          message: selectedCopy.lobbyActions.notFound,
+          isSubmitting: false
+        };
+        render(getStoredLanguage());
+        return;
+      }
+
+      throw new Error("Could not join lobby.");
+    }
+
+    window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
+  } catch {
+    joinLobbyModal = {
+      ...joinLobbyModal,
+      message: selectedCopy.lobbyActions.joinError,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
   }
 };
 
@@ -1294,7 +1700,42 @@ const loadAllMatches = async () => {
   }
 };
 
+const loadLobby = async () => {
+  if (getCurrentPage() !== "lobby") {
+    return;
+  }
+
+  const lobbyCode = getLobbyCodeFromUrl();
+
+  if (!lobbyCode) {
+    return;
+  }
+
+  isLobbyLoading = true;
+  lobbyError = null;
+  currentLobby = null;
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}`);
+
+    if (!response.ok) {
+      throw new Error("Could not load lobby.");
+    }
+
+    const result = (await response.json()) as { lobby?: Lobby };
+    currentLobby = result.lobby ?? null;
+  } catch {
+    currentLobby = null;
+    lobbyError = "unavailable";
+  } finally {
+    isLobbyLoading = false;
+    render(getStoredLanguage());
+  }
+};
+
 render(getStoredLanguage());
 void loadCurrentUser();
 void loadCarouselMatches();
 void loadAllMatches();
+void loadLobby();
