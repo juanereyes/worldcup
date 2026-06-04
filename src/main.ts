@@ -1499,7 +1499,7 @@ const render = (language: Language) => {
       });
     } finally {
       currentUser = null;
-      render(getStoredLanguage());
+      window.location.href = "/";
     }
   });
 
