@@ -68,6 +68,7 @@ type Lobby = {
   code: string;
   name: string;
   requiresPassword: boolean;
+  memberCount: number;
   members: LobbyMember[];
 };
 
@@ -93,6 +94,22 @@ type LeaveLobbyModalState = {
   isOpen: boolean;
   lobby: Lobby | null;
   returnToHome: boolean;
+  message: string | null;
+  isSubmitting: boolean;
+};
+
+type KickMemberModalState = {
+  isOpen: boolean;
+  lobby: Lobby | null;
+  member: LobbyMember | null;
+  message: string | null;
+  isSubmitting: boolean;
+};
+
+type DeleteLobbyModalState = {
+  isOpen: boolean;
+  lobby: Lobby | null;
+  confirmationText: string;
   message: string | null;
   isSubmitting: boolean;
 };
@@ -167,6 +184,8 @@ type Copy = {
     admin: string;
     groupCode: string;
     leaveLobby: string;
+    kickMember: string;
+    deleteLobby: string;
   };
   lobbyActions: {
     joinTitle: string;
@@ -207,6 +226,22 @@ type Copy = {
   leaveLobby: {
     title: string;
     body: (name: string) => string;
+    confirm: string;
+    cancel: string;
+    error: string;
+  };
+  kickMember: {
+    title: string;
+    body: (username: string, lobbyName: string) => string;
+    confirm: string;
+    cancel: string;
+    error: string;
+  };
+  deleteLobby: {
+    title: string;
+    body: (name: string, phrase: string) => string;
+    phrase: string;
+    label: string;
     confirm: string;
     cancel: string;
     error: string;
@@ -266,6 +301,20 @@ let leaveLobbyModal: LeaveLobbyModalState = {
   isOpen: false,
   lobby: null,
   returnToHome: false,
+  message: null,
+  isSubmitting: false
+};
+let kickMemberModal: KickMemberModalState = {
+  isOpen: false,
+  lobby: null,
+  member: null,
+  message: null,
+  isSubmitting: false
+};
+let deleteLobbyModal: DeleteLobbyModalState = {
+  isOpen: false,
+  lobby: null,
+  confirmationText: "",
   message: null,
   isSubmitting: false
 };
@@ -546,7 +595,9 @@ const copy: Record<Language, Copy> = {
       members: "Members",
       admin: "Admin",
       groupCode: "Group code",
-      leaveLobby: "Leave lobby"
+      leaveLobby: "Leave lobby",
+      kickMember: "Kick",
+      deleteLobby: "Delete lobby"
     },
     lobbyActions: {
       joinTitle: "Join a group",
@@ -590,6 +641,22 @@ const copy: Record<Language, Copy> = {
       confirm: "Leave lobby",
       cancel: "Cancel",
       error: "Could not leave this lobby right now."
+    },
+    kickMember: {
+      title: "Kick member",
+      body: (username, lobbyName) => `Are you sure you want to remove ${username} from ${lobbyName}?`,
+      confirm: "Kick member",
+      cancel: "Cancel",
+      error: "Could not remove this member right now."
+    },
+    deleteLobby: {
+      title: "Delete lobby",
+      body: (name, phrase) => `This will permanently delete ${name}. Type "${phrase}" to confirm.`,
+      phrase: "delete lobby",
+      label: "Confirmation text",
+      confirm: "Delete lobby",
+      cancel: "Cancel",
+      error: "Could not delete this lobby right now."
     }
   },
   es: {
@@ -675,7 +742,9 @@ const copy: Record<Language, Copy> = {
       members: "Miembros",
       admin: "Admin",
       groupCode: "Código del grupo",
-      leaveLobby: "Salir del lobby"
+      leaveLobby: "Salir del lobby",
+      kickMember: "Expulsar",
+      deleteLobby: "Eliminar lobby"
     },
     lobbyActions: {
       joinTitle: "Unirse a un grupo",
@@ -719,6 +788,22 @@ const copy: Record<Language, Copy> = {
       confirm: "Salir del lobby",
       cancel: "Cancelar",
       error: "No se pudo salir de este lobby en este momento."
+    },
+    kickMember: {
+      title: "Expulsar miembro",
+      body: (username, lobbyName) => `¿Seguro que quieres expulsar a ${username} de ${lobbyName}?`,
+      confirm: "Expulsar miembro",
+      cancel: "Cancelar",
+      error: "No se pudo expulsar a este miembro en este momento."
+    },
+    deleteLobby: {
+      title: "Eliminar lobby",
+      body: (name, phrase) => `Esto eliminará ${name} permanentemente. Escribe "${phrase}" para confirmar.`,
+      phrase: "eliminar lobby",
+      label: "Texto de confirmación",
+      confirm: "Eliminar lobby",
+      cancel: "Cancelar",
+      error: "No se pudo eliminar este lobby en este momento."
     }
   }
 };
@@ -769,6 +854,16 @@ const isLobbyPasswordValid = (password: string) =>
   /[A-Z]/.test(password) &&
   /[a-z]/.test(password) &&
   /\d/.test(password);
+
+const isCurrentUserLobbyAdmin = (lobby: Lobby | null) => {
+  if (!currentUser || !lobby) {
+    return false;
+  }
+
+  const userId = currentUser.id;
+
+  return lobby.members.some((member) => member.userId === userId && member.role === "admin");
+};
 
 const getTeamStanding = (teamName: string) => teamLookup.get(normalizeTeamName(teamName));
 
@@ -1195,6 +1290,7 @@ const renderBracketPage = (selectedCopy: Copy, language: Language) => {
 
 const renderLobbyPage = (selectedCopy: Copy) => {
   const lobbyCode = getLobbyCodeFromUrl();
+  const isAdmin = isCurrentUserLobbyAdmin(currentLobby);
 
   return `
     <section class="lobby-section" id="lobby" aria-label="${selectedCopy.lobbyPage.aria}">
@@ -1224,6 +1320,11 @@ const renderLobbyPage = (selectedCopy: Copy) => {
                             ? `<button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>`
                             : ""
                         }
+                        ${
+                          isAdmin
+                            ? `<button class="danger-action compact-danger-action" type="button" data-delete-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.deleteLobby}</button>`
+                            : ""
+                        }
                       </span>
                     </div>
                     ${
@@ -1236,11 +1337,18 @@ const renderLobbyPage = (selectedCopy: Copy) => {
                                 (member) => `
                                   <li class="lobby-member">
                                     <span>${member.username}</span>
-                                    ${
-                                      member.role === "admin"
-                                        ? `<strong>${selectedCopy.lobbyPage.admin}</strong>`
-                                        : ""
-                                    }
+                                    <span class="lobby-member-actions">
+                                      ${
+                                        member.role === "admin"
+                                          ? `<strong>${selectedCopy.lobbyPage.admin}</strong>`
+                                          : ""
+                                      }
+                                      ${
+                                        isAdmin && currentUser?.id !== member.userId && member.role !== "admin"
+                                          ? `<button class="leave-lobby-button is-visible" type="button" data-kick-member-id="${member.userId}" data-kick-member-name="${member.username}">${selectedCopy.lobbyPage.kickMember}</button>`
+                                          : ""
+                                      }
+                                    </span>
                                   </li>
                                 `
                               )
@@ -1449,6 +1557,76 @@ const renderLeaveLobbyModal = (selectedCopy: Copy) => {
   `;
 };
 
+const renderKickMemberModal = (selectedCopy: Copy) => {
+  if (!kickMemberModal.isOpen || !kickMemberModal.lobby || !kickMemberModal.member) {
+    return "";
+  }
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="join-lobby-modal" role="dialog" aria-modal="true" aria-labelledby="kick-member-title">
+        <div class="modal-header">
+          <h2 id="kick-member-title">${selectedCopy.kickMember.title}</h2>
+          <button class="modal-close" type="button" id="kick-member-close" aria-label="${selectedCopy.kickMember.cancel}">
+            ×
+          </button>
+        </div>
+        <p class="leave-lobby-body">${selectedCopy.kickMember.body(kickMemberModal.member.username, kickMemberModal.lobby.name)}</p>
+        ${kickMemberModal.message ? `<p class="join-lobby-message">${kickMemberModal.message}</p>` : ""}
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="kick-member-cancel">
+            ${selectedCopy.kickMember.cancel}
+          </button>
+          <button class="danger-action" type="button" id="kick-member-confirm" ${kickMemberModal.isSubmitting ? "disabled" : ""}>
+            ${selectedCopy.kickMember.confirm}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
+const renderDeleteLobbyModal = (selectedCopy: Copy) => {
+  if (!deleteLobbyModal.isOpen || !deleteLobbyModal.lobby) {
+    return "";
+  }
+
+  const isConfirmationValid = deleteLobbyModal.confirmationText.trim().toLowerCase() === selectedCopy.deleteLobby.phrase;
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="join-lobby-modal" role="dialog" aria-modal="true" aria-labelledby="delete-lobby-title">
+        <div class="modal-header">
+          <h2 id="delete-lobby-title">${selectedCopy.deleteLobby.title}</h2>
+          <button class="modal-close" type="button" id="delete-lobby-close" aria-label="${selectedCopy.deleteLobby.cancel}">
+            ×
+          </button>
+        </div>
+        <p class="leave-lobby-body">${selectedCopy.deleteLobby.body(deleteLobbyModal.lobby.name, selectedCopy.deleteLobby.phrase)}</p>
+        <label class="join-code-field delete-confirmation-field" for="delete-lobby-confirmation">
+          <span>${selectedCopy.deleteLobby.label}</span>
+          <input
+            id="delete-lobby-confirmation"
+            name="confirmation"
+            type="text"
+            autocomplete="off"
+            value="${deleteLobbyModal.confirmationText}"
+          />
+        </label>
+        ${deleteLobbyModal.message ? `<p class="join-lobby-message">${deleteLobbyModal.message}</p>` : ""}
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="delete-lobby-cancel">
+            ${selectedCopy.deleteLobby.cancel}
+          </button>
+          <button class="danger-action" type="button" id="delete-lobby-confirm" ${deleteLobbyModal.isSubmitting || !isConfirmationValid ? "disabled" : ""}>
+            ${selectedCopy.deleteLobby.confirm}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
 const renderStandings = (selectedCopy: Copy, language: Language) => {
   const standings = getComputedStandings();
 
@@ -1648,6 +1826,8 @@ const render = (language: Language) => {
   ${renderCreateLobbyModal(selectedCopy)}
   ${renderJoinLobbyModal(selectedCopy)}
   ${renderLeaveLobbyModal(selectedCopy)}
+  ${renderKickMemberModal(selectedCopy)}
+  ${renderDeleteLobbyModal(selectedCopy)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -1675,6 +1855,15 @@ const render = (language: Language) => {
   const leaveLobbyCloseButton = document.querySelector<HTMLButtonElement>("#leave-lobby-close");
   const leaveLobbyCancelButton = document.querySelector<HTMLButtonElement>("#leave-lobby-cancel");
   const leaveLobbyConfirmButton = document.querySelector<HTMLButtonElement>("#leave-lobby-confirm");
+  const kickMemberButtons = document.querySelectorAll<HTMLButtonElement>("[data-kick-member-id]");
+  const kickMemberCloseButton = document.querySelector<HTMLButtonElement>("#kick-member-close");
+  const kickMemberCancelButton = document.querySelector<HTMLButtonElement>("#kick-member-cancel");
+  const kickMemberConfirmButton = document.querySelector<HTMLButtonElement>("#kick-member-confirm");
+  const deleteLobbyButtons = document.querySelectorAll<HTMLButtonElement>("[data-delete-lobby-code]");
+  const deleteLobbyInput = document.querySelector<HTMLInputElement>("#delete-lobby-confirmation");
+  const deleteLobbyCloseButton = document.querySelector<HTMLButtonElement>("#delete-lobby-close");
+  const deleteLobbyCancelButton = document.querySelector<HTMLButtonElement>("#delete-lobby-cancel");
+  const deleteLobbyConfirmButton = document.querySelector<HTMLButtonElement>("#delete-lobby-confirm");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -1884,6 +2073,103 @@ const render = (language: Language) => {
   leaveLobbyConfirmButton?.addEventListener("click", () => {
     void leaveCurrentLobby(selectedCopy);
   });
+
+  const closeKickMemberModal = () => {
+    kickMemberModal = {
+      isOpen: false,
+      lobby: null,
+      member: null,
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  kickMemberButtons.forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!currentLobby) {
+        return;
+      }
+
+      const userId = Number(button.dataset.kickMemberId ?? "0");
+      const username = button.dataset.kickMemberName ?? "";
+      const member = currentLobby.members.find((item) => item.userId === userId) ?? {
+        userId,
+        username,
+        role: "member" as const
+      };
+
+      kickMemberModal = {
+        isOpen: true,
+        lobby: currentLobby,
+        member,
+        message: null,
+        isSubmitting: false
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  kickMemberCloseButton?.addEventListener("click", closeKickMemberModal);
+  kickMemberCancelButton?.addEventListener("click", closeKickMemberModal);
+  kickMemberConfirmButton?.addEventListener("click", () => {
+    void kickLobbyMember(selectedCopy);
+  });
+
+  const closeDeleteLobbyModal = () => {
+    deleteLobbyModal = {
+      isOpen: false,
+      lobby: null,
+      confirmationText: "",
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  deleteLobbyButtons.forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const lobbyCode = button.dataset.deleteLobbyCode ?? "";
+      const lobby = currentLobby?.code === lobbyCode ? currentLobby : null;
+
+      if (!lobby) {
+        return;
+      }
+
+      deleteLobbyModal = {
+        isOpen: true,
+        lobby,
+        confirmationText: "",
+        message: null,
+        isSubmitting: false
+      };
+      render(getStoredLanguage());
+      document.querySelector<HTMLInputElement>("#delete-lobby-confirmation")?.focus();
+    });
+  });
+
+  deleteLobbyInput?.addEventListener("input", () => {
+    deleteLobbyModal = {
+      ...deleteLobbyModal,
+      confirmationText: deleteLobbyInput.value,
+      message: null
+    };
+    if (deleteLobbyConfirmButton) {
+      deleteLobbyConfirmButton.disabled =
+        deleteLobbyModal.confirmationText.trim().toLowerCase() !== selectedCopy.deleteLobby.phrase;
+    }
+  });
+
+  deleteLobbyCloseButton?.addEventListener("click", closeDeleteLobbyModal);
+  deleteLobbyCancelButton?.addEventListener("click", closeDeleteLobbyModal);
+  deleteLobbyConfirmButton?.addEventListener("click", () => {
+    void deleteCurrentLobby(selectedCopy);
+  });
 };
 
 const loadCurrentUser = async () => {
@@ -2079,6 +2365,100 @@ const leaveCurrentLobby = async (selectedCopy: Copy) => {
     leaveLobbyModal = {
       ...leaveLobbyModal,
       message: selectedCopy.leaveLobby.error,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  }
+};
+
+const kickLobbyMember = async (selectedCopy: Copy) => {
+  const user = await getAuthenticatedUser();
+  const lobby = kickMemberModal.lobby;
+  const member = kickMemberModal.member;
+
+  if (!user || !lobby || !member) {
+    return;
+  }
+
+  kickMemberModal = {
+    ...kickMemberModal,
+    isSubmitting: true,
+    message: null
+  };
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(
+      `${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}/members/${member.userId}?actingUserId=${user.id}`,
+      {
+        method: "DELETE"
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Could not kick member.");
+    }
+
+    kickMemberModal = {
+      isOpen: false,
+      lobby: null,
+      member: null,
+      message: null,
+      isSubmitting: false
+    };
+    await loadLobby();
+  } catch {
+    kickMemberModal = {
+      ...kickMemberModal,
+      message: selectedCopy.kickMember.error,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  }
+};
+
+const deleteCurrentLobby = async (selectedCopy: Copy) => {
+  const user = await getAuthenticatedUser();
+  const lobby = deleteLobbyModal.lobby;
+
+  if (!user || !lobby) {
+    return;
+  }
+
+  if (deleteLobbyModal.confirmationText.trim().toLowerCase() !== selectedCopy.deleteLobby.phrase) {
+    return;
+  }
+
+  deleteLobbyModal = {
+    ...deleteLobbyModal,
+    isSubmitting: true,
+    message: null
+  };
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}?actingUserId=${user.id}`, {
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not delete lobby.");
+    }
+
+    deleteLobbyModal = {
+      isOpen: false,
+      lobby: null,
+      confirmationText: "",
+      message: null,
+      isSubmitting: false
+    };
+    currentLobby = null;
+    userLobbies = userLobbies.filter((item) => item.code !== lobby.code);
+    window.location.href = "/my-lobbies.html";
+  } catch {
+    deleteLobbyModal = {
+      ...deleteLobbyModal,
+      message: selectedCopy.deleteLobby.error,
       isSubmitting: false
     };
     render(getStoredLanguage());

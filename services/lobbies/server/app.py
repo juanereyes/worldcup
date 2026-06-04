@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from lobby_service.database import (
     InvalidLobbyPasswordCredentialsError,
@@ -12,15 +12,18 @@ from lobby_service.database import (
     LobbyMemberAlreadyExistsError,
     LobbyMemberNotFoundError,
     LobbyNotFoundError,
+    LobbyPermissionError,
     LobbyPasswordRequiredError,
     LobbyRecord,
     add_lobby_member,
     connect,
     create_lobby,
+    delete_lobby,
     get_lobby,
     initialize_database,
     list_user_lobbies,
     remove_lobby_member,
+    remove_lobby_member_by_admin,
 )
 
 HOST = "127.0.0.1"
@@ -189,6 +192,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path_parts = [part for part in parsed.path.split("/") if part]
 
+        if len(path_parts) == 2 and path_parts[0] == "lobbies":
+            self.delete_lobby(path_parts[1], parsed.query)
+            return
+
         if len(path_parts) != 4 or path_parts[0] != "lobbies" or path_parts[2] != "members":
             self.send_json(404, {"error": "Not found."})
             return
@@ -203,19 +210,70 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             initialize_database(connection)
 
             try:
-                remove_lobby_member(
-                    connection,
-                    code=path_parts[1],
-                    user_id=user_id,
-                )
+                acting_user_id = self.get_query_user_id(parsed.query, "actingUserId")
+
+                if acting_user_id is None or acting_user_id == user_id:
+                    remove_lobby_member(
+                        connection,
+                        code=path_parts[1],
+                        user_id=user_id,
+                    )
+                else:
+                    remove_lobby_member_by_admin(
+                        connection,
+                        code=path_parts[1],
+                        acting_user_id=acting_user_id,
+                        target_user_id=user_id,
+                    )
             except LobbyNotFoundError as error:
                 self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
                 return
             except LobbyMemberNotFoundError as error:
                 self.send_json(404, {"code": "member_not_found", "error": str(error)})
                 return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
 
         self.send_json(200, {"status": "removed"})
+
+    def delete_lobby(self, code: str, query: str) -> None:
+        acting_user_id = self.get_query_user_id(query, "actingUserId")
+
+        if acting_user_id is None:
+            self.send_json(400, {"error": "Acting user id is required."})
+            return
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                delete_lobby(
+                    connection,
+                    code=code,
+                    acting_user_id=acting_user_id,
+                )
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+
+        self.send_json(200, {"status": "deleted"})
+
+    def get_query_user_id(self, query: str, key: str) -> int | None:
+        values = parse_qs(query).get(key)
+
+        if not values:
+            return None
+
+        try:
+            user_id = int(values[0])
+        except (TypeError, ValueError):
+            return None
+
+        return user_id if user_id > 0 else None
 
     def read_json_body(self) -> dict[str, Any] | None:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -250,6 +308,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             "code": lobby.code,
             "name": lobby.name,
             "requiresPassword": lobby.requires_password,
+            "memberCount": lobby.member_count,
             "members": [
                 {
                     "userId": member.user_id,

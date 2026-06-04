@@ -946,6 +946,13 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   text-transform: uppercase;
 }
 
+.lobby-member-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
 .lobby-empty {
   color: var(--muted);
   font-weight: 750;
@@ -1031,7 +1038,8 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 
 #create-lobby-name,
 #create-lobby-password,
-#join-lobby-password {
+#join-lobby-password,
+#delete-lobby-confirmation {
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0;
@@ -1175,6 +1183,11 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 .danger-action {
   background: #fff6f5;
   padding: 13px 18px;
+}
+
+.compact-danger-action {
+  flex: 0 0 auto;
+  padding: 9px 11px;
 }
 
 .leave-lobby-button:hover,

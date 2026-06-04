@@ -16,14 +16,17 @@ from lobby_service.database import (
     LobbyMemberAlreadyExistsError,
     LobbyMemberNotFoundError,
     LobbyNotFoundError,
+    LobbyPermissionError,
     LobbyPasswordRequiredError,
     add_lobby_member,
     connect,
     create_lobby,
+    delete_lobby,
     get_lobby,
     initialize_database,
     list_user_lobbies,
     remove_lobby_member,
+    remove_lobby_member_by_admin,
 )
 
 
@@ -55,6 +58,7 @@ class LobbyServiceTest(unittest.TestCase):
         self.assertEqual(len(stored_lobby.code), 4)
         self.assertEqual(stored_lobby.code, stored_lobby.code.upper())
         self.assertEqual(stored_lobby.name, "Friends")
+        self.assertEqual(stored_lobby.member_count, 1)
         self.assertEqual(stored_lobby.members[0].username, "juan")
         self.assertEqual(stored_lobby.members[0].role, "admin")
         self.assertFalse(stored_lobby.requires_password)
@@ -117,6 +121,7 @@ class LobbyServiceTest(unittest.TestCase):
         )
 
         self.assertEqual([member.username for member in updated_lobby.members], ["juan", "ana"])
+        self.assertEqual(updated_lobby.member_count, 2)
         self.assertEqual(updated_lobby.members[1].role, "member")
 
     def test_add_lobby_member_requires_password_for_protected_lobby(self) -> None:
@@ -252,7 +257,31 @@ class LobbyServiceTest(unittest.TestCase):
         updated_lobby = get_lobby(self.connection, lobby.code)
 
         self.assertEqual([member.username for member in updated_lobby.members], ["ana"])
+        self.assertEqual(updated_lobby.member_count, 1)
         self.assertEqual(list_user_lobbies(self.connection, 1), [])
+
+    def test_initialize_database_backfills_member_count(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+        self.connection.execute(
+            "UPDATE lobbies SET member_count = 0 WHERE code = ?",
+            (lobby.code,),
+        )
+        self.connection.commit()
+
+        initialize_database(self.connection)
+        updated_lobby = get_lobby(self.connection, lobby.code)
+
+        self.assertEqual(updated_lobby.member_count, 2)
 
     def test_remove_lobby_member_rejects_missing_membership(self) -> None:
         lobby = create_lobby(
@@ -266,6 +295,101 @@ class LobbyServiceTest(unittest.TestCase):
                 self.connection,
                 code=lobby.code,
                 user_id=99,
+            )
+
+    def test_admin_can_remove_lobby_member(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        remove_lobby_member_by_admin(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+            target_user_id=2,
+        )
+        updated_lobby = get_lobby(self.connection, lobby.code)
+
+        self.assertEqual([member.username for member in updated_lobby.members], ["juan"])
+        self.assertEqual(updated_lobby.member_count, 1)
+
+    def test_non_admin_cannot_remove_lobby_member(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=3,
+            username="luis",
+        )
+
+        with self.assertRaises(LobbyPermissionError):
+            remove_lobby_member_by_admin(
+                self.connection,
+                code=lobby.code,
+                acting_user_id=2,
+                target_user_id=3,
+            )
+
+    def test_admin_can_delete_lobby(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        delete_lobby(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+        )
+
+        with self.assertRaises(LobbyNotFoundError):
+            get_lobby(self.connection, lobby.code)
+        self.assertEqual(list_user_lobbies(self.connection, 1), [])
+        self.assertEqual(list_user_lobbies(self.connection, 2), [])
+
+    def test_non_admin_cannot_delete_lobby(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        with self.assertRaises(LobbyPermissionError):
+            delete_lobby(
+                self.connection,
+                code=lobby.code,
+                acting_user_id=2,
             )
 
 

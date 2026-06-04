@@ -49,6 +49,10 @@ class InvalidLobbyPasswordCredentialsError(ValueError):
     pass
 
 
+class LobbyPermissionError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class LobbyMemberRecord:
     user_id: int
@@ -61,6 +65,7 @@ class LobbyRecord:
     code: str
     name: str
     requires_password: bool
+    member_count: int
     members: list[LobbyMemberRecord]
 
 
@@ -86,6 +91,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           name TEXT NOT NULL,
           created_by_user_id INTEGER NOT NULL,
           password_hash TEXT,
+          member_count INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -98,6 +104,9 @@ def initialize_database(connection: sqlite3.Connection) -> None:
     if "password_hash" not in columns:
         connection.execute("ALTER TABLE lobbies ADD COLUMN password_hash TEXT")
 
+    if "member_count" not in columns:
+        connection.execute("ALTER TABLE lobbies ADD COLUMN member_count INTEGER NOT NULL DEFAULT 0")
+
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS lobby_members (
@@ -108,6 +117,16 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (lobby_code, user_id),
           FOREIGN KEY (lobby_code) REFERENCES lobbies(code) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        UPDATE lobbies
+        SET member_count = (
+          SELECT COUNT(*)
+          FROM lobby_members
+          WHERE lobby_members.lobby_code = lobbies.code
         )
         """
     )
@@ -148,8 +167,8 @@ def create_lobby(
         try:
             connection.execute(
                 """
-                INSERT INTO lobbies (code, name, created_by_user_id, password_hash)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO lobbies (code, name, created_by_user_id, password_hash, member_count)
+                VALUES (?, ?, ?, ?, 1)
                 """,
                 (code, lobby_name, created_by_user_id, password_hash),
             )
@@ -221,6 +240,14 @@ def add_lobby_member(
         """,
         (normalized_code, user_id, clean_username),
     )
+    connection.execute(
+        """
+        UPDATE lobbies
+        SET member_count = member_count + 1
+        WHERE code = ?
+        """,
+        (normalized_code,),
+    )
     connection.commit()
 
     return get_lobby(connection, normalized_code)
@@ -264,7 +291,65 @@ def remove_lobby_member(
             """,
             (normalized_code,),
         )
+    else:
+        connection.execute(
+            """
+            UPDATE lobbies
+            SET member_count = member_count - 1
+            WHERE code = ?
+            """,
+            (normalized_code,),
+        )
 
+    connection.commit()
+
+
+def remove_lobby_member_by_admin(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    acting_user_id: int,
+    target_user_id: int,
+) -> None:
+    normalized_code = code.strip().upper()
+    lobby = get_lobby(connection, normalized_code)
+
+    if not _is_lobby_admin(connection, normalized_code, acting_user_id):
+        raise LobbyPermissionError("Only lobby admins can remove other members.")
+
+    if acting_user_id == target_user_id:
+        raise LobbyPermissionError("Admins should leave the lobby instead of kicking themselves.")
+
+    target_member = next((member for member in lobby.members if member.user_id == target_user_id), None)
+
+    if target_member is None:
+        raise LobbyMemberNotFoundError("User is not in this lobby.")
+
+    if target_member.role == "admin":
+        raise LobbyPermissionError("Admins cannot remove another admin.")
+
+    remove_lobby_member(connection, code=normalized_code, user_id=target_user_id)
+
+
+def delete_lobby(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    acting_user_id: int,
+) -> None:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_admin(connection, normalized_code, acting_user_id):
+        raise LobbyPermissionError("Only lobby admins can delete this lobby.")
+
+    connection.execute(
+        """
+        DELETE FROM lobbies
+        WHERE code = ?
+        """,
+        (normalized_code,),
+    )
     connection.commit()
 
 
@@ -272,7 +357,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
     normalized_code = code.strip().upper()
     lobby = connection.execute(
         """
-        SELECT code, name, password_hash
+        SELECT code, name, password_hash, member_count
         FROM lobbies
         WHERE code = ?
         """,
@@ -296,6 +381,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
         code=str(lobby["code"]),
         name=str(lobby["name"]),
         requires_password=lobby["password_hash"] is not None,
+        member_count=int(lobby["member_count"]),
         members=[
             LobbyMemberRecord(
                 user_id=int(row["user_id"]),
@@ -320,3 +406,16 @@ def list_user_lobbies(connection: sqlite3.Connection, user_id: int) -> list[Lobb
     ).fetchall()
 
     return [get_lobby(connection, str(row["code"])) for row in rows]
+
+
+def _is_lobby_admin(connection: sqlite3.Connection, code: str, user_id: int) -> bool:
+    row = connection.execute(
+        """
+        SELECT role
+        FROM lobby_members
+        WHERE lobby_code = ? AND user_id = ?
+        """,
+        (code, user_id),
+    ).fetchone()
+
+    return row is not None and str(row["role"]) == "admin"
