@@ -13,8 +13,8 @@ The service listens on `http://127.0.0.1:8003`.
 ## API
 
 - `GET /health` returns service health.
-- `POST /lobbies` creates a lobby with a unique 4-character uppercase alphanumeric code.
+- `POST /lobbies` creates a lobby with a unique 4-character uppercase alphanumeric code and an optional password.
 - `GET /lobbies/{code}` returns lobby metadata and members.
-- `POST /lobbies/{code}/members` adds a user to a lobby.
+- `POST /lobbies/{code}/members` adds a user to a lobby, requiring the lobby password when one is set.
 - `DELETE /lobbies/{code}/members/{userId}` removes a user from a lobby.
 - `GET /users/{userId}/lobbies` returns every lobby a user belongs to.

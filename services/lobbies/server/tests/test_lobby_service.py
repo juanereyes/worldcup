@@ -5,13 +5,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from argon2 import PasswordHasher
+
 from lobby_service import database
 from lobby_service.database import (
+    InvalidLobbyPasswordCredentialsError,
+    InvalidLobbyPasswordError,
     LOBBY_CODE_ALPHABET,
     LobbyCodeExhaustedError,
     LobbyMemberAlreadyExistsError,
     LobbyMemberNotFoundError,
     LobbyNotFoundError,
+    LobbyPasswordRequiredError,
     add_lobby_member,
     connect,
     create_lobby,
@@ -52,6 +57,34 @@ class LobbyServiceTest(unittest.TestCase):
         self.assertEqual(stored_lobby.name, "Friends")
         self.assertEqual(stored_lobby.members[0].username, "juan")
         self.assertEqual(stored_lobby.members[0].role, "admin")
+        self.assertFalse(stored_lobby.requires_password)
+
+    def test_create_lobby_hashes_optional_password_with_argon2id(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=7,
+            created_by_username="juan",
+            name="Friends",
+            password="Worldcup1",
+        )
+        row = self.connection.execute(
+            "SELECT password_hash FROM lobbies WHERE code = ?",
+            (lobby.code,),
+        ).fetchone()
+
+        self.assertTrue(lobby.requires_password)
+        self.assertIsNotNone(row)
+        self.assertTrue(row["password_hash"].startswith("$argon2id$"))
+        PasswordHasher().verify(row["password_hash"], "Worldcup1")
+
+    def test_create_lobby_rejects_invalid_optional_password(self) -> None:
+        with self.assertRaises(InvalidLobbyPasswordError):
+            create_lobby(
+                self.connection,
+                created_by_user_id=7,
+                created_by_username="juan",
+                password="password",
+            )
 
     def test_create_lobby_retries_when_code_collides(self) -> None:
         with patch.object(database, "generate_lobby_code", side_effect=["ABCD", "ABCD", "WXYZ"]):
@@ -85,6 +118,41 @@ class LobbyServiceTest(unittest.TestCase):
 
         self.assertEqual([member.username for member in updated_lobby.members], ["juan", "ana"])
         self.assertEqual(updated_lobby.members[1].role, "member")
+
+    def test_add_lobby_member_requires_password_for_protected_lobby(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+            password="Worldcup1",
+        )
+
+        with self.assertRaises(LobbyPasswordRequiredError):
+            add_lobby_member(
+                self.connection,
+                code=lobby.code,
+                user_id=2,
+                username="ana",
+            )
+
+        with self.assertRaises(InvalidLobbyPasswordCredentialsError):
+            add_lobby_member(
+                self.connection,
+                code=lobby.code,
+                user_id=2,
+                username="ana",
+                password="Wrongpass1",
+            )
+
+        updated_lobby = add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+            password="Worldcup1",
+        )
+
+        self.assertEqual([member.username for member in updated_lobby.members], ["juan", "ana"])
 
     def test_add_lobby_member_rejects_existing_member(self) -> None:
         lobby = create_lobby(

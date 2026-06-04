@@ -6,10 +6,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from lobby_service.database import (
+    InvalidLobbyPasswordCredentialsError,
+    InvalidLobbyPasswordError,
     LobbyCodeExhaustedError,
     LobbyMemberAlreadyExistsError,
     LobbyMemberNotFoundError,
     LobbyNotFoundError,
+    LobbyPasswordRequiredError,
     LobbyRecord,
     add_lobby_member,
     connect,
@@ -96,6 +99,8 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
         created_by_username = str(payload.get("createdByUsername", ""))
         name = str(payload.get("name", "World Cup Lobby"))
+        raw_password = payload.get("password")
+        password = raw_password if isinstance(raw_password, str) else None
 
         if created_by_user_id <= 0 or not created_by_username.strip():
             self.send_json(400, {"error": "Creator user id and username are required."})
@@ -110,7 +115,18 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     created_by_user_id=created_by_user_id,
                     created_by_username=created_by_username,
                     name=name,
+                    password=password,
                 )
+            except InvalidLobbyPasswordError as error:
+                self.send_json(
+                    400,
+                    {
+                        "code": "invalid_password_policy",
+                        "error": str(error),
+                        "requirements": error.errors,
+                    },
+                )
+                return
             except ValueError as error:
                 self.send_json(400, {"error": str(error)})
                 return
@@ -133,6 +149,8 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             user_id = 0
 
         username = str(payload.get("username", ""))
+        raw_password = payload.get("password")
+        password = raw_password if isinstance(raw_password, str) and raw_password else None
 
         if user_id <= 0 or not username.strip():
             self.send_json(400, {"error": "User id and username are required."})
@@ -147,12 +165,19 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     code=code,
                     user_id=user_id,
                     username=username,
+                    password=password,
                 )
             except LobbyNotFoundError as error:
                 self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
                 return
             except LobbyMemberAlreadyExistsError as error:
                 self.send_json(409, {"code": "already_member", "error": str(error)})
+                return
+            except LobbyPasswordRequiredError as error:
+                self.send_json(403, {"code": "password_required", "error": str(error)})
+                return
+            except InvalidLobbyPasswordCredentialsError as error:
+                self.send_json(403, {"code": "invalid_lobby_password", "error": str(error)})
                 return
             except ValueError as error:
                 self.send_json(400, {"error": str(error)})
@@ -224,6 +249,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         return {
             "code": lobby.code,
             "name": lobby.name,
+            "requiresPassword": lobby.requires_password,
             "members": [
                 {
                     "userId": member.user_id,

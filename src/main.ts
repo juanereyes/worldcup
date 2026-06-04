@@ -67,12 +67,24 @@ type LobbyMember = {
 type Lobby = {
   code: string;
   name: string;
+  requiresPassword: boolean;
   members: LobbyMember[];
+};
+
+type CreateLobbyModalState = {
+  isOpen: boolean;
+  name: string;
+  usePassword: boolean;
+  password: string;
+  message: string | null;
+  isSubmitting: boolean;
 };
 
 type JoinLobbyModalState = {
   isOpen: boolean;
   code: string;
+  password: string;
+  needsPassword: boolean;
   message: string | null;
   isSubmitting: boolean;
 };
@@ -167,6 +179,20 @@ type Copy = {
     joinError: string;
     alreadyInGroup: string;
     notFound: string;
+    passwordRequired: string;
+    invalidPassword: string;
+  };
+  createLobby: {
+    title: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    passwordToggle: string;
+    passwordLabel: string;
+    passwordHelp: string;
+    submit: string;
+    cancel: string;
+    invalidName: string;
+    invalidPassword: string;
   };
   myLobbiesPage: {
     title: string;
@@ -220,9 +246,19 @@ let matchesError: string | null = null;
 let allMatchesError: string | null = null;
 let lobbyError: string | null = null;
 let userLobbiesError: string | null = null;
+let createLobbyModal: CreateLobbyModalState = {
+  isOpen: false,
+  name: "",
+  usePassword: false,
+  password: "",
+  message: null,
+  isSubmitting: false
+};
 let joinLobbyModal: JoinLobbyModalState = {
   isOpen: false,
   code: "",
+  password: "",
+  needsPassword: false,
   message: null,
   isSubmitting: false
 };
@@ -522,7 +558,21 @@ const copy: Record<Language, Copy> = {
       createError: "Could not create the lobby right now.",
       joinError: "Could not join that lobby right now.",
       alreadyInGroup: "You are already in this group.",
-      notFound: "That group cannot be found."
+      notFound: "That group cannot be found.",
+      passwordRequired: "This lobby requires a password.",
+      invalidPassword: "That lobby password is not correct."
+    },
+    createLobby: {
+      title: "Create a lobby",
+      nameLabel: "Lobby name",
+      namePlaceholder: "Friends pool",
+      passwordToggle: "Require a password to join",
+      passwordLabel: "Lobby password",
+      passwordHelp: "At least 8 characters, one uppercase letter, one lowercase letter, and one number.",
+      submit: "Create lobby",
+      cancel: "Cancel",
+      invalidName: "Enter a lobby name.",
+      invalidPassword: "Lobby passwords need at least 8 characters, one uppercase letter, one lowercase letter, and one number."
     },
     myLobbiesPage: {
       title: "My lobbies",
@@ -637,7 +687,21 @@ const copy: Record<Language, Copy> = {
       createError: "No se pudo crear el lobby en este momento.",
       joinError: "No se pudo unir a ese lobby en este momento.",
       alreadyInGroup: "Ya estás en este grupo.",
-      notFound: "No se pudo encontrar ese grupo."
+      notFound: "No se pudo encontrar ese grupo.",
+      passwordRequired: "Este lobby requiere contraseña.",
+      invalidPassword: "La contraseña del lobby no es correcta."
+    },
+    createLobby: {
+      title: "Crear lobby",
+      nameLabel: "Nombre del lobby",
+      namePlaceholder: "Polla de amigos",
+      passwordToggle: "Requerir contraseña para unirse",
+      passwordLabel: "Contraseña del lobby",
+      passwordHelp: "Mínimo 8 caracteres, una mayúscula, una minúscula y un número.",
+      submit: "Crear lobby",
+      cancel: "Cancelar",
+      invalidName: "Ingresa un nombre para el lobby.",
+      invalidPassword: "La contraseña del lobby necesita mínimo 8 caracteres, una mayúscula, una minúscula y un número."
     },
     myLobbiesPage: {
       title: "Mis lobbies",
@@ -699,6 +763,12 @@ const getLobbyCodeFromUrl = () => {
 
   return code.trim().toUpperCase();
 };
+
+const isLobbyPasswordValid = (password: string) =>
+  password.length >= 8 &&
+  /[A-Z]/.test(password) &&
+  /[a-z]/.test(password) &&
+  /\d/.test(password);
 
 const getTeamStanding = (teamName: string) => teamLookup.get(normalizeTeamName(teamName));
 
@@ -1228,6 +1298,69 @@ const renderMyLobbiesPage = (selectedCopy: Copy) => `
   </section>
 `;
 
+const renderCreateLobbyModal = (selectedCopy: Copy) => {
+  if (!createLobbyModal.isOpen) {
+    return "";
+  }
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="join-lobby-modal" role="dialog" aria-modal="true" aria-labelledby="create-lobby-title">
+        <form id="create-lobby-form">
+          <div class="modal-header">
+            <h2 id="create-lobby-title">${selectedCopy.createLobby.title}</h2>
+            <button class="modal-close" type="button" id="create-lobby-close" aria-label="${selectedCopy.createLobby.cancel}">
+              ×
+            </button>
+          </div>
+          <label class="join-code-field" for="create-lobby-name">
+            <span>${selectedCopy.createLobby.nameLabel}</span>
+            <input
+              id="create-lobby-name"
+              name="name"
+              type="text"
+              autocomplete="off"
+              maxlength="80"
+              placeholder="${selectedCopy.createLobby.namePlaceholder}"
+              value="${createLobbyModal.name}"
+            />
+          </label>
+          <label class="lobby-password-toggle">
+            <input id="create-lobby-password-toggle" type="checkbox" ${createLobbyModal.usePassword ? "checked" : ""} />
+            <span>${selectedCopy.createLobby.passwordToggle}</span>
+          </label>
+          ${
+            createLobbyModal.usePassword
+              ? `
+                <label class="join-code-field" for="create-lobby-password">
+                  <span>${selectedCopy.createLobby.passwordLabel}</span>
+                  <input
+                    id="create-lobby-password"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    value="${createLobbyModal.password}"
+                  />
+                </label>
+                <p class="field-help">${selectedCopy.createLobby.passwordHelp}</p>
+              `
+              : ""
+          }
+          ${createLobbyModal.message ? `<p class="join-lobby-message">${createLobbyModal.message}</p>` : ""}
+          <div class="modal-actions">
+            <button class="secondary-action" type="button" id="create-lobby-cancel">
+              ${selectedCopy.createLobby.cancel}
+            </button>
+            <button class="primary-action" type="submit" ${createLobbyModal.isSubmitting ? "disabled" : ""}>
+              ${selectedCopy.createLobby.submit}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+};
+
 const renderJoinLobbyModal = (selectedCopy: Copy) => {
   if (!joinLobbyModal.isOpen) {
     return "";
@@ -1256,6 +1389,22 @@ const renderJoinLobbyModal = (selectedCopy: Copy) => {
               value="${joinLobbyModal.code}"
             />
           </label>
+          ${
+            joinLobbyModal.needsPassword
+              ? `
+                <label class="join-code-field" for="join-lobby-password">
+                  <span>${selectedCopy.createLobby.passwordLabel}</span>
+                  <input
+                    id="join-lobby-password"
+                    name="password"
+                    type="password"
+                    autocomplete="current-password"
+                    value="${joinLobbyModal.password}"
+                  />
+                </label>
+              `
+              : ""
+          }
           ${joinLobbyModal.message ? `<p class="join-lobby-message">${joinLobbyModal.message}</p>` : ""}
           <div class="modal-actions">
             <button class="secondary-action" type="button" id="join-lobby-cancel">
@@ -1496,6 +1645,7 @@ const render = (language: Language) => {
     ${renderTopbar(selectedCopy, selectedLanguage, language)}
     ${pageContent}
   </section>
+  ${renderCreateLobbyModal(selectedCopy)}
   ${renderJoinLobbyModal(selectedCopy)}
   ${renderLeaveLobbyModal(selectedCopy)}
 `;
@@ -1509,9 +1659,16 @@ const render = (language: Language) => {
   const signOutButton = document.querySelector<HTMLButtonElement>("#signout-button");
   const carouselButtons = document.querySelectorAll<HTMLButtonElement>("[data-carousel-action]");
   const createLobbyButton = document.querySelector<HTMLButtonElement>("#create-lobby-button");
+  const createLobbyForm = document.querySelector<HTMLFormElement>("#create-lobby-form");
+  const createLobbyNameInput = document.querySelector<HTMLInputElement>("#create-lobby-name");
+  const createLobbyPasswordToggle = document.querySelector<HTMLInputElement>("#create-lobby-password-toggle");
+  const createLobbyPasswordInput = document.querySelector<HTMLInputElement>("#create-lobby-password");
+  const createLobbyCloseButton = document.querySelector<HTMLButtonElement>("#create-lobby-close");
+  const createLobbyCancelButton = document.querySelector<HTMLButtonElement>("#create-lobby-cancel");
   const joinLobbyButton = document.querySelector<HTMLButtonElement>("#join-lobby-button");
   const joinLobbyForm = document.querySelector<HTMLFormElement>("#join-lobby-form");
   const joinLobbyCodeInput = document.querySelector<HTMLInputElement>("#join-lobby-code");
+  const joinLobbyPasswordInput = document.querySelector<HTMLInputElement>("#join-lobby-password");
   const joinLobbyCloseButton = document.querySelector<HTMLButtonElement>("#join-lobby-close");
   const joinLobbyCancelButton = document.querySelector<HTMLButtonElement>("#join-lobby-cancel");
   const leaveLobbyButtons = document.querySelectorAll<HTMLButtonElement>("[data-leave-lobby-code]");
@@ -1601,11 +1758,56 @@ const render = (language: Language) => {
   });
 
   createLobbyButton?.addEventListener("click", () => {
-    void createLobbyFromHome(selectedCopy);
+    void openCreateLobbyModal();
   });
 
   joinLobbyButton?.addEventListener("click", () => {
     void openJoinLobbyModal();
+  });
+
+  createLobbyNameInput?.addEventListener("input", () => {
+    createLobbyModal = {
+      ...createLobbyModal,
+      name: createLobbyNameInput.value,
+      message: null
+    };
+  });
+
+  createLobbyPasswordToggle?.addEventListener("change", () => {
+    createLobbyModal = {
+      ...createLobbyModal,
+      usePassword: createLobbyPasswordToggle.checked,
+      password: createLobbyPasswordToggle.checked ? createLobbyModal.password : "",
+      message: null
+    };
+    render(getStoredLanguage());
+  });
+
+  createLobbyPasswordInput?.addEventListener("input", () => {
+    createLobbyModal = {
+      ...createLobbyModal,
+      password: createLobbyPasswordInput.value,
+      message: null
+    };
+  });
+
+  const closeCreateLobbyModal = () => {
+    createLobbyModal = {
+      isOpen: false,
+      name: "",
+      usePassword: false,
+      password: "",
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  createLobbyCloseButton?.addEventListener("click", closeCreateLobbyModal);
+  createLobbyCancelButton?.addEventListener("click", closeCreateLobbyModal);
+  createLobbyForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void createLobbyFromHome(selectedCopy);
   });
 
   joinLobbyCodeInput?.addEventListener("input", () => {
@@ -1617,10 +1819,20 @@ const render = (language: Language) => {
     joinLobbyCodeInput.value = joinLobbyModal.code;
   });
 
+  joinLobbyPasswordInput?.addEventListener("input", () => {
+    joinLobbyModal = {
+      ...joinLobbyModal,
+      password: joinLobbyPasswordInput.value,
+      message: null
+    };
+  });
+
   const closeJoinLobbyModal = () => {
     joinLobbyModal = {
       isOpen: false,
       code: "",
+      password: "",
+      needsPassword: false,
       message: null,
       isSubmitting: false
     };
@@ -1721,12 +1933,60 @@ const getAuthenticatedUser = async () => {
   return currentUser;
 };
 
+const openCreateLobbyModal = async () => {
+  const user = await getAuthenticatedUser();
+
+  if (!user) {
+    return;
+  }
+
+  createLobbyModal = {
+    isOpen: true,
+    name: "",
+    usePassword: false,
+    password: "",
+    message: null,
+    isSubmitting: false
+  };
+  render(getStoredLanguage());
+  document.querySelector<HTMLInputElement>("#create-lobby-name")?.focus();
+};
+
 const createLobbyFromHome = async (selectedCopy: Copy) => {
   const user = await getAuthenticatedUser();
 
   if (!user) {
     return;
   }
+
+  const lobbyName = createLobbyModal.name.trim();
+
+  if (!lobbyName) {
+    createLobbyModal = {
+      ...createLobbyModal,
+      message: selectedCopy.createLobby.invalidName,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+    return;
+  }
+
+  if (createLobbyModal.usePassword && !isLobbyPasswordValid(createLobbyModal.password)) {
+    createLobbyModal = {
+      ...createLobbyModal,
+      message: selectedCopy.createLobby.invalidPassword,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+    return;
+  }
+
+  createLobbyModal = {
+    ...createLobbyModal,
+    message: null,
+    isSubmitting: true
+  };
+  render(getStoredLanguage());
 
   try {
     const response = await fetch(`${lobbiesApiUrl}/lobbies`, {
@@ -1737,11 +1997,24 @@ const createLobbyFromHome = async (selectedCopy: Copy) => {
       body: JSON.stringify({
         createdByUserId: user.id,
         createdByUsername: user.username,
-        name: `${user.username}'s World Cup Lobby`
+        name: lobbyName,
+        password: createLobbyModal.usePassword ? createLobbyModal.password : undefined
       })
     });
 
     if (!response.ok) {
+      const result = (await response.json().catch(() => ({}))) as { code?: string };
+
+      if (result.code === "invalid_password_policy") {
+        createLobbyModal = {
+          ...createLobbyModal,
+          message: selectedCopy.createLobby.invalidPassword,
+          isSubmitting: false
+        };
+        render(getStoredLanguage());
+        return;
+      }
+
       throw new Error("Could not create lobby.");
     }
 
@@ -1753,7 +2026,12 @@ const createLobbyFromHome = async (selectedCopy: Copy) => {
 
     window.location.href = `/lobby.html?code=${encodeURIComponent(result.lobby.code)}`;
   } catch {
-    window.alert(selectedCopy.lobbyActions.createError);
+    createLobbyModal = {
+      ...createLobbyModal,
+      message: selectedCopy.lobbyActions.createError,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
   }
 };
 
@@ -1817,6 +2095,8 @@ const openJoinLobbyModal = async () => {
   joinLobbyModal = {
     isOpen: true,
     code: "",
+    password: "",
+    needsPassword: false,
     message: null,
     isSubmitting: false
   };
@@ -1858,7 +2138,8 @@ const joinLobbyFromHome = async (selectedCopy: Copy) => {
       },
       body: JSON.stringify({
         userId: user.id,
-        username: user.username
+        username: user.username,
+        password: joinLobbyModal.password || undefined
       })
     });
 
@@ -1879,6 +2160,28 @@ const joinLobbyFromHome = async (selectedCopy: Copy) => {
         joinLobbyModal = {
           ...joinLobbyModal,
           message: selectedCopy.lobbyActions.notFound,
+          isSubmitting: false
+        };
+        render(getStoredLanguage());
+        return;
+      }
+
+      if (response.status === 403 && result.code === "password_required") {
+        joinLobbyModal = {
+          ...joinLobbyModal,
+          needsPassword: true,
+          message: selectedCopy.lobbyActions.passwordRequired,
+          isSubmitting: false
+        };
+        render(getStoredLanguage());
+        return;
+      }
+
+      if (response.status === 403 && result.code === "invalid_lobby_password") {
+        joinLobbyModal = {
+          ...joinLobbyModal,
+          needsPassword: true,
+          message: selectedCopy.lobbyActions.invalidPassword,
           isSubmitting: false
         };
         render(getStoredLanguage());

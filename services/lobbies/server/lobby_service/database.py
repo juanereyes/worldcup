@@ -6,10 +6,17 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerificationError, VerifyMismatchError
+from argon2.low_level import Type
+
+from .password_policy import password_errors
+
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = SERVICE_ROOT / "data" / "lobbies.sqlite3"
 LOBBY_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789"
 LOBBY_CODE_LENGTH = 4
+password_hasher = PasswordHasher(type=Type.ID)
 
 
 class LobbyNotFoundError(ValueError):
@@ -28,6 +35,20 @@ class LobbyMemberNotFoundError(ValueError):
     pass
 
 
+class InvalidLobbyPasswordError(ValueError):
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("Lobby password does not meet the required policy.")
+        self.errors = errors
+
+
+class LobbyPasswordRequiredError(ValueError):
+    pass
+
+
+class InvalidLobbyPasswordCredentialsError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class LobbyMemberRecord:
     user_id: int
@@ -39,6 +60,7 @@ class LobbyMemberRecord:
 class LobbyRecord:
     code: str
     name: str
+    requires_password: bool
     members: list[LobbyMemberRecord]
 
 
@@ -63,10 +85,19 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           code TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           created_by_user_id INTEGER NOT NULL,
+          password_hash TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(lobbies)").fetchall()
+    }
+
+    if "password_hash" not in columns:
+        connection.execute("ALTER TABLE lobbies ADD COLUMN password_hash TEXT")
+
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS lobby_members (
@@ -93,13 +124,23 @@ def create_lobby(
     created_by_user_id: int,
     created_by_username: str,
     name: str = "World Cup Lobby",
+    password: str | None = None,
     max_attempts: int = 100,
 ) -> LobbyRecord:
     lobby_name = name.strip() or "World Cup Lobby"
     username = created_by_username.strip()
+    password_hash = None
 
     if not username:
         raise ValueError("Username is required.")
+
+    if password is not None:
+        errors = password_errors(password)
+
+        if errors:
+            raise InvalidLobbyPasswordError(errors)
+
+        password_hash = password_hasher.hash(password)
 
     for _ in range(max_attempts):
         code = generate_lobby_code()
@@ -107,10 +148,10 @@ def create_lobby(
         try:
             connection.execute(
                 """
-                INSERT INTO lobbies (code, name, created_by_user_id)
-                VALUES (?, ?, ?)
+                INSERT INTO lobbies (code, name, created_by_user_id, password_hash)
+                VALUES (?, ?, ?, ?)
                 """,
-                (code, lobby_name, created_by_user_id),
+                (code, lobby_name, created_by_user_id, password_hash),
             )
             connection.execute(
                 """
@@ -133,6 +174,7 @@ def add_lobby_member(
     code: str,
     user_id: int,
     username: str,
+    password: str | None = None,
 ) -> LobbyRecord:
     normalized_code = code.strip().upper()
     clean_username = username.strip()
@@ -140,7 +182,7 @@ def add_lobby_member(
     if not clean_username:
         raise ValueError("Username is required.")
 
-    get_lobby(connection, normalized_code)
+    lobby = get_lobby(connection, normalized_code)
     existing_member = connection.execute(
         """
         SELECT user_id
@@ -152,6 +194,25 @@ def add_lobby_member(
 
     if existing_member is not None:
         raise LobbyMemberAlreadyExistsError("User is already in this lobby.")
+
+    if lobby.requires_password:
+        row = connection.execute(
+            """
+            SELECT password_hash
+            FROM lobbies
+            WHERE code = ?
+            """,
+            (normalized_code,),
+        ).fetchone()
+        password_hash = str(row["password_hash"]) if row and row["password_hash"] else ""
+
+        if not password:
+            raise LobbyPasswordRequiredError("Lobby password is required.")
+
+        try:
+            password_hasher.verify(password_hash, password)
+        except (VerificationError, VerifyMismatchError) as error:
+            raise InvalidLobbyPasswordCredentialsError("Lobby password is incorrect.") from error
 
     connection.execute(
         """
@@ -211,7 +272,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
     normalized_code = code.strip().upper()
     lobby = connection.execute(
         """
-        SELECT code, name
+        SELECT code, name, password_hash
         FROM lobbies
         WHERE code = ?
         """,
@@ -234,6 +295,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
     return LobbyRecord(
         code=str(lobby["code"]),
         name=str(lobby["name"]),
+        requires_password=lobby["password_hash"] is not None,
         members=[
             LobbyMemberRecord(
                 user_id=int(row["user_id"]),

@@ -1029,6 +1029,38 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   text-transform: uppercase;
 }
 
+#create-lobby-name,
+#create-lobby-password,
+#join-lobby-password {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.lobby-password-toggle {
+  align-items: center;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font-weight: 750;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.lobby-password-toggle input {
+  accent-color: var(--green);
+  height: 18px;
+  width: 18px;
+}
+
+.field-help {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 8px 0 0;
+}
+
 .join-code-field input:focus-visible,
 .modal-close:focus-visible {
   border-color: #c7d1c5;
