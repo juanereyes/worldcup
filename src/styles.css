@@ -884,6 +884,12 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   justify-content: space-between;
 }
 
+.lobby-card-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
 .lobby-card-header {
   background: #f6f8f3;
   border-bottom: 1px solid var(--line);
@@ -1037,13 +1043,20 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   margin: 12px 0 0;
 }
 
+.leave-lobby-body {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0;
+}
+
 .modal-actions {
   gap: 10px;
   justify-content: flex-end;
   margin-top: 20px;
 }
 
-.primary-action:disabled {
+.primary-action:disabled,
+.danger-action:disabled {
   cursor: not-allowed;
   opacity: 0.7;
 }
@@ -1066,23 +1079,32 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 }
 
 .my-lobby-card:hover,
-.my-lobby-card:focus-visible {
+.my-lobby-card:focus-within {
   border-color: #c7d1c5;
   box-shadow: 0 0 0 3px rgba(15, 107, 79, 0.12);
   outline: none;
 }
 
-.my-lobby-card > span,
+.my-lobby-link {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.my-lobby-link > span,
 .my-lobby-meta {
   display: grid;
   gap: 5px;
 }
 
-.my-lobby-card strong {
+.my-lobby-link strong {
   color: var(--green-dark);
 }
 
-.my-lobby-card small,
+.my-lobby-link small,
 .my-lobby-meta span {
   color: var(--muted);
   font-size: 0.82rem;
@@ -1092,6 +1114,44 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 .my-lobby-meta {
   justify-items: end;
   text-align: right;
+}
+
+.leave-lobby-button,
+.danger-action {
+  border: 1px solid rgba(200, 61, 53, 0.32);
+  border-radius: 8px;
+  color: var(--red);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.leave-lobby-button {
+  background: #fff6f5;
+  flex: 0 0 auto;
+  opacity: 0;
+  padding: 9px 11px;
+  pointer-events: none;
+}
+
+.leave-lobby-button.is-visible,
+.my-lobby-card:hover .leave-lobby-button,
+.my-lobby-card:focus-within .leave-lobby-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.danger-action {
+  background: #fff6f5;
+  padding: 13px 18px;
+}
+
+.leave-lobby-button:hover,
+.leave-lobby-button:focus-visible,
+.danger-action:hover,
+.danger-action:focus-visible {
+  border-color: rgba(200, 61, 53, 0.5);
+  box-shadow: 0 0 0 3px rgba(200, 61, 53, 0.12);
+  outline: none;
 }
 
 @media (max-width: 840px) {
@@ -1128,6 +1188,23 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 
   .match-day-grid {
     grid-template-columns: 1fr;
+  }
+
+  .my-lobby-card,
+  .my-lobby-link,
+  .lobby-card-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .my-lobby-meta {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .leave-lobby-button {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .bracket-board {

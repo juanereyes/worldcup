@@ -10,12 +10,15 @@ from lobby_service.database import (
     LOBBY_CODE_ALPHABET,
     LobbyCodeExhaustedError,
     LobbyMemberAlreadyExistsError,
+    LobbyMemberNotFoundError,
+    LobbyNotFoundError,
     add_lobby_member,
     connect,
     create_lobby,
     get_lobby,
     initialize_database,
     list_user_lobbies,
+    remove_lobby_member,
 )
 
 
@@ -139,6 +142,63 @@ class LobbyServiceTest(unittest.TestCase):
 
         self.assertEqual({lobby.code for lobby in lobbies}, {first.code, second.code})
         self.assertEqual(list_user_lobbies(self.connection, 99), [])
+
+    def test_remove_lobby_member_deletes_empty_lobby(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+            name="First",
+        )
+
+        remove_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=1,
+        )
+
+        with self.assertRaises(LobbyNotFoundError):
+            get_lobby(self.connection, lobby.code)
+        self.assertEqual(list_user_lobbies(self.connection, 1), [])
+
+    def test_remove_lobby_member_keeps_lobby_with_remaining_members(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+            name="First",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        remove_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=1,
+        )
+
+        updated_lobby = get_lobby(self.connection, lobby.code)
+
+        self.assertEqual([member.username for member in updated_lobby.members], ["ana"])
+        self.assertEqual(list_user_lobbies(self.connection, 1), [])
+
+    def test_remove_lobby_member_rejects_missing_membership(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+
+        with self.assertRaises(LobbyMemberNotFoundError):
+            remove_lobby_member(
+                self.connection,
+                code=lobby.code,
+                user_id=99,
+            )
 
 
 if __name__ == "__main__":

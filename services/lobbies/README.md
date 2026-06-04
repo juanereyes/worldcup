@@ -16,4 +16,5 @@ The service listens on `http://127.0.0.1:8003`.
 - `POST /lobbies` creates a lobby with a unique 4-character uppercase alphanumeric code.
 - `GET /lobbies/{code}` returns lobby metadata and members.
 - `POST /lobbies/{code}/members` adds a user to a lobby.
+- `DELETE /lobbies/{code}/members/{userId}` removes a user from a lobby.
 - `GET /users/{userId}/lobbies` returns every lobby a user belongs to.

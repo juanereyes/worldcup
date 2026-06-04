@@ -24,6 +24,10 @@ class LobbyMemberAlreadyExistsError(ValueError):
     pass
 
 
+class LobbyMemberNotFoundError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class LobbyMemberRecord:
     user_id: int
@@ -159,6 +163,48 @@ def add_lobby_member(
     connection.commit()
 
     return get_lobby(connection, normalized_code)
+
+
+def remove_lobby_member(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    user_id: int,
+) -> None:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+    cursor = connection.execute(
+        """
+        DELETE FROM lobby_members
+        WHERE lobby_code = ? AND user_id = ?
+        """,
+        (normalized_code, user_id),
+    )
+
+    if cursor.rowcount == 0:
+        connection.rollback()
+        raise LobbyMemberNotFoundError("User is not in this lobby.")
+
+    remaining_member = connection.execute(
+        """
+        SELECT user_id
+        FROM lobby_members
+        WHERE lobby_code = ?
+        LIMIT 1
+        """,
+        (normalized_code,),
+    ).fetchone()
+
+    if remaining_member is None:
+        connection.execute(
+            """
+            DELETE FROM lobbies
+            WHERE code = ?
+            """,
+            (normalized_code,),
+        )
+
+    connection.commit()
 
 
 def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:

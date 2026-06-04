@@ -77,6 +77,14 @@ type JoinLobbyModalState = {
   isSubmitting: boolean;
 };
 
+type LeaveLobbyModalState = {
+  isOpen: boolean;
+  lobby: Lobby | null;
+  returnToHome: boolean;
+  message: string | null;
+  isSubmitting: boolean;
+};
+
 type Copy = {
   brandAria: string;
   navAria: string;
@@ -146,6 +154,7 @@ type Copy = {
     members: string;
     admin: string;
     groupCode: string;
+    leaveLobby: string;
   };
   lobbyActions: {
     joinTitle: string;
@@ -168,6 +177,13 @@ type Copy = {
     openLobby: string;
     groupCode: string;
     members: string;
+  };
+  leaveLobby: {
+    title: string;
+    body: (name: string) => string;
+    confirm: string;
+    cancel: string;
+    error: string;
   };
 };
 
@@ -207,6 +223,13 @@ let userLobbiesError: string | null = null;
 let joinLobbyModal: JoinLobbyModalState = {
   isOpen: false,
   code: "",
+  message: null,
+  isSubmitting: false
+};
+let leaveLobbyModal: LeaveLobbyModalState = {
+  isOpen: false,
+  lobby: null,
+  returnToHome: false,
   message: null,
   isSubmitting: false
 };
@@ -486,7 +509,8 @@ const copy: Record<Language, Copy> = {
       missingCode: "Open a lobby with a code in the URL.",
       members: "Members",
       admin: "Admin",
-      groupCode: "Group code"
+      groupCode: "Group code",
+      leaveLobby: "Leave lobby"
     },
     lobbyActions: {
       joinTitle: "Join a group",
@@ -509,6 +533,13 @@ const copy: Record<Language, Copy> = {
       openLobby: "Open lobby",
       groupCode: "Group code",
       members: "Members"
+    },
+    leaveLobby: {
+      title: "Leave lobby",
+      body: (name) => `Are you sure you want to leave ${name}?`,
+      confirm: "Leave lobby",
+      cancel: "Cancel",
+      error: "Could not leave this lobby right now."
     }
   },
   es: {
@@ -593,7 +624,8 @@ const copy: Record<Language, Copy> = {
       missingCode: "Abre un lobby con un código en la URL.",
       members: "Miembros",
       admin: "Admin",
-      groupCode: "Código del grupo"
+      groupCode: "Código del grupo",
+      leaveLobby: "Salir del lobby"
     },
     lobbyActions: {
       joinTitle: "Unirse a un grupo",
@@ -616,6 +648,13 @@ const copy: Record<Language, Copy> = {
       openLobby: "Abrir lobby",
       groupCode: "Código del grupo",
       members: "Miembros"
+    },
+    leaveLobby: {
+      title: "Salir del lobby",
+      body: (name) => `¿Seguro que quieres salir de ${name}?`,
+      confirm: "Salir del lobby",
+      cancel: "Cancelar",
+      error: "No se pudo salir de este lobby en este momento."
     }
   }
 };
@@ -1105,9 +1144,16 @@ const renderLobbyPage = (selectedCopy: Copy) => {
                   <article class="lobby-card">
                     <div class="lobby-card-header">
                       <span>${selectedCopy.lobbyPage.members}</span>
-                      <span class="lobby-code">
-                        <span>${selectedCopy.lobbyPage.groupCode}</span>
-                        <strong>${currentLobby.code}</strong>
+                      <span class="lobby-card-actions">
+                        <span class="lobby-code">
+                          <span>${selectedCopy.lobbyPage.groupCode}</span>
+                          <strong>${currentLobby.code}</strong>
+                        </span>
+                        ${
+                          currentUser && currentLobby.members.some((member) => member.userId === currentUser?.id)
+                            ? `<button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>`
+                            : ""
+                        }
                       </span>
                     </div>
                     ${
@@ -1158,16 +1204,21 @@ const renderMyLobbiesPage = (selectedCopy: Copy) => `
                 ${userLobbies
                   .map(
                     (lobby) => `
-                      <a class="my-lobby-card" href="/lobby.html?code=${encodeURIComponent(lobby.code)}">
-                        <span>
-                          <strong>${lobby.name}</strong>
-                          <small>${selectedCopy.myLobbiesPage.groupCode}: ${lobby.code}</small>
-                        </span>
-                        <span class="my-lobby-meta">
-                          <span>${lobby.members.length} ${selectedCopy.myLobbiesPage.members}</span>
-                          <strong>${selectedCopy.myLobbiesPage.openLobby}</strong>
-                        </span>
-                      </a>
+                      <article class="my-lobby-card">
+                        <a class="my-lobby-link" href="/lobby.html?code=${encodeURIComponent(lobby.code)}">
+                          <span>
+                            <strong>${lobby.name}</strong>
+                            <small>${selectedCopy.myLobbiesPage.groupCode}: ${lobby.code}</small>
+                          </span>
+                          <span class="my-lobby-meta">
+                            <span>${lobby.members.length} ${selectedCopy.myLobbiesPage.members}</span>
+                            <strong>${selectedCopy.myLobbiesPage.openLobby}</strong>
+                          </span>
+                        </a>
+                        <button class="leave-lobby-button" type="button" data-leave-lobby-code="${lobby.code}">
+                          ${selectedCopy.lobbyPage.leaveLobby}
+                        </button>
+                      </article>
                     `
                   )
                   .join("")}
@@ -1215,6 +1266,35 @@ const renderJoinLobbyModal = (selectedCopy: Copy) => {
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  `;
+};
+
+const renderLeaveLobbyModal = (selectedCopy: Copy) => {
+  if (!leaveLobbyModal.isOpen || !leaveLobbyModal.lobby) {
+    return "";
+  }
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="join-lobby-modal" role="dialog" aria-modal="true" aria-labelledby="leave-lobby-title">
+        <div class="modal-header">
+          <h2 id="leave-lobby-title">${selectedCopy.leaveLobby.title}</h2>
+          <button class="modal-close" type="button" id="leave-lobby-close" aria-label="${selectedCopy.leaveLobby.cancel}">
+            ×
+          </button>
+        </div>
+        <p class="leave-lobby-body">${selectedCopy.leaveLobby.body(leaveLobbyModal.lobby.name)}</p>
+        ${leaveLobbyModal.message ? `<p class="join-lobby-message">${leaveLobbyModal.message}</p>` : ""}
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="leave-lobby-cancel">
+            ${selectedCopy.leaveLobby.cancel}
+          </button>
+          <button class="danger-action" type="button" id="leave-lobby-confirm" ${leaveLobbyModal.isSubmitting ? "disabled" : ""}>
+            ${selectedCopy.leaveLobby.confirm}
+          </button>
+        </div>
       </section>
     </div>
   `;
@@ -1417,6 +1497,7 @@ const render = (language: Language) => {
     ${pageContent}
   </section>
   ${renderJoinLobbyModal(selectedCopy)}
+  ${renderLeaveLobbyModal(selectedCopy)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -1433,6 +1514,10 @@ const render = (language: Language) => {
   const joinLobbyCodeInput = document.querySelector<HTMLInputElement>("#join-lobby-code");
   const joinLobbyCloseButton = document.querySelector<HTMLButtonElement>("#join-lobby-close");
   const joinLobbyCancelButton = document.querySelector<HTMLButtonElement>("#join-lobby-cancel");
+  const leaveLobbyButtons = document.querySelectorAll<HTMLButtonElement>("[data-leave-lobby-code]");
+  const leaveLobbyCloseButton = document.querySelector<HTMLButtonElement>("#leave-lobby-close");
+  const leaveLobbyCancelButton = document.querySelector<HTMLButtonElement>("#leave-lobby-cancel");
+  const leaveLobbyConfirmButton = document.querySelector<HTMLButtonElement>("#leave-lobby-confirm");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -1548,6 +1633,45 @@ const render = (language: Language) => {
     event.preventDefault();
     void joinLobbyFromHome(selectedCopy);
   });
+
+  const closeLeaveLobbyModal = () => {
+    leaveLobbyModal = {
+      isOpen: false,
+      lobby: null,
+      returnToHome: false,
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  leaveLobbyButtons.forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const lobbyCode = button.dataset.leaveLobbyCode ?? "";
+      const lobby = currentLobby?.code === lobbyCode ? currentLobby : userLobbies.find((item) => item.code === lobbyCode);
+
+      if (!lobby) {
+        return;
+      }
+
+      leaveLobbyModal = {
+        isOpen: true,
+        lobby,
+        returnToHome: getCurrentPage() === "lobby",
+        message: null,
+        isSubmitting: false
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  leaveLobbyCloseButton?.addEventListener("click", closeLeaveLobbyModal);
+  leaveLobbyCancelButton?.addEventListener("click", closeLeaveLobbyModal);
+  leaveLobbyConfirmButton?.addEventListener("click", () => {
+    void leaveCurrentLobby(selectedCopy);
+  });
 };
 
 const loadCurrentUser = async () => {
@@ -1630,6 +1754,56 @@ const createLobbyFromHome = async (selectedCopy: Copy) => {
     window.location.href = `/lobby.html?code=${encodeURIComponent(result.lobby.code)}`;
   } catch {
     window.alert(selectedCopy.lobbyActions.createError);
+  }
+};
+
+const leaveCurrentLobby = async (selectedCopy: Copy) => {
+  const user = await getAuthenticatedUser();
+  const lobby = leaveLobbyModal.lobby;
+
+  if (!user || !lobby) {
+    return;
+  }
+
+  leaveLobbyModal = {
+    ...leaveLobbyModal,
+    isSubmitting: true,
+    message: null
+  };
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}/members/${user.id}`, {
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not leave lobby.");
+    }
+
+    const shouldReturnHome = leaveLobbyModal.returnToHome;
+    leaveLobbyModal = {
+      isOpen: false,
+      lobby: null,
+      returnToHome: false,
+      message: null,
+      isSubmitting: false
+    };
+
+    if (shouldReturnHome) {
+      window.location.href = "/";
+      return;
+    }
+
+    userLobbies = userLobbies.filter((item) => item.code !== lobby.code);
+    render(getStoredLanguage());
+  } catch {
+    leaveLobbyModal = {
+      ...leaveLobbyModal,
+      message: selectedCopy.leaveLobby.error,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
   }
 };
 

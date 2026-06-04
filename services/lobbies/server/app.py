@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from lobby_service.database import (
     LobbyCodeExhaustedError,
     LobbyMemberAlreadyExistsError,
+    LobbyMemberNotFoundError,
     LobbyNotFoundError,
     LobbyRecord,
     add_lobby_member,
@@ -16,6 +17,7 @@ from lobby_service.database import (
     get_lobby,
     initialize_database,
     list_user_lobbies,
+    remove_lobby_member,
 )
 
 HOST = "127.0.0.1"
@@ -158,6 +160,38 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
         self.send_json(200, {"lobby": self.lobby_payload(lobby)})
 
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        path_parts = [part for part in parsed.path.split("/") if part]
+
+        if len(path_parts) != 4 or path_parts[0] != "lobbies" or path_parts[2] != "members":
+            self.send_json(404, {"error": "Not found."})
+            return
+
+        try:
+            user_id = int(path_parts[3])
+        except ValueError:
+            self.send_json(400, {"error": "User id must be a number."})
+            return
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                remove_lobby_member(
+                    connection,
+                    code=path_parts[1],
+                    user_id=user_id,
+                )
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyMemberNotFoundError as error:
+                self.send_json(404, {"code": "member_not_found", "error": str(error)})
+                return
+
+        self.send_json(200, {"status": "removed"})
+
     def read_json_body(self) -> dict[str, Any] | None:
         content_length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(content_length)
@@ -183,7 +217,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         allowed_origin = origin if origin in ALLOWED_ORIGINS else "http://127.0.0.1:5173"
 
         self.send_header("Access-Control-Allow-Origin", allowed_origin)
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def lobby_payload(self, lobby: LobbyRecord) -> dict[str, Any]:
