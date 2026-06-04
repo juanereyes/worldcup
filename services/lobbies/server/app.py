@@ -15,6 +15,7 @@ from lobby_service.database import (
     create_lobby,
     get_lobby,
     initialize_database,
+    list_user_lobbies,
 )
 
 HOST = "127.0.0.1"
@@ -50,6 +51,20 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     return
 
             self.send_json(200, {"lobby": self.lobby_payload(lobby)})
+            return
+
+        if len(path_parts) == 3 and path_parts[0] == "users" and path_parts[2] == "lobbies":
+            try:
+                user_id = int(path_parts[1])
+            except ValueError:
+                self.send_json(400, {"error": "User id must be a number."})
+                return
+
+            with connect() as connection:
+                initialize_database(connection)
+                lobbies = list_user_lobbies(connection, user_id)
+
+            self.send_json(200, {"lobbies": [self.lobby_payload(lobby) for lobby in lobbies]})
             return
 
         self.send_json(404, {"error": "Not found."})

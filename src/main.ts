@@ -42,7 +42,7 @@ type CurrentUser = {
   displayName: string;
 };
 
-type Page = "home" | "groups" | "matches" | "bracket" | "lobby";
+type Page = "home" | "groups" | "matches" | "bracket" | "lobby" | "my-lobbies";
 
 type CarouselMatch = {
   id: number;
@@ -86,6 +86,7 @@ type Copy = {
     groups: string;
     bracket: string;
     matches: string;
+    myLobbies: string;
   };
   signIn: string;
   signOut: string;
@@ -158,6 +159,16 @@ type Copy = {
     alreadyInGroup: string;
     notFound: string;
   };
+  myLobbiesPage: {
+    title: string;
+    aria: string;
+    loading: string;
+    error: string;
+    empty: string;
+    openLobby: string;
+    groupCode: string;
+    members: string;
+  };
 };
 
 const languageOptions: LanguageOption[] = [
@@ -183,13 +194,16 @@ let currentUser: CurrentUser | null = null;
 let carouselMatches: CarouselMatch[] = [];
 let allMatches: CarouselMatch[] = [];
 let currentLobby: Lobby | null = null;
+let userLobbies: Lobby[] = [];
 let activeMatchIndex = 0;
 let isMatchesLoading = true;
 let isAllMatchesLoading = false;
 let isLobbyLoading = false;
+let isUserLobbiesLoading = false;
 let matchesError: string | null = null;
 let allMatchesError: string | null = null;
 let lobbyError: string | null = null;
+let userLobbiesError: string | null = null;
 let joinLobbyModal: JoinLobbyModalState = {
   isOpen: false,
   code: "",
@@ -396,9 +410,10 @@ const copy: Record<Language, Copy> = {
     matchAria: "World Cup match carousel",
     languageLabel: "Language",
     nav: {
-      groups: "Groups",
+      groups: "Standings",
       bracket: "Bracket",
-      matches: "Matches"
+      matches: "Matches",
+      myLobbies: "My lobbies"
     },
     signIn: "Sign in",
     signOut: "Sign out",
@@ -407,7 +422,7 @@ const copy: Record<Language, Copy> = {
     summary:
       "Invite your people, predict every match, and use a scoring system that fits how your group likes to compete.",
     actions: {
-      createGroup: "Create a group",
+      createGroup: "Create a lobby",
       joinGroup: "Join with a code"
     },
     match: {
@@ -484,6 +499,16 @@ const copy: Record<Language, Copy> = {
       joinError: "Could not join that lobby right now.",
       alreadyInGroup: "You are already in this group.",
       notFound: "That group cannot be found."
+    },
+    myLobbiesPage: {
+      title: "My lobbies",
+      aria: "Your prediction lobbies",
+      loading: "Loading your lobbies...",
+      error: "Your lobbies are not available right now.",
+      empty: "You are not in any lobbies yet.",
+      openLobby: "Open lobby",
+      groupCode: "Group code",
+      members: "Members"
     }
   },
   es: {
@@ -492,9 +517,10 @@ const copy: Record<Language, Copy> = {
     matchAria: "Carrusel de partidos del Mundial",
     languageLabel: "Idioma",
     nav: {
-      groups: "Grupos",
+      groups: "Posiciones",
       bracket: "Llaves",
-      matches: "Partidos"
+      matches: "Partidos",
+      myLobbies: "Mis lobbies"
     },
     signIn: "Iniciar sesión",
     signOut: "Cerrar sesión",
@@ -503,7 +529,7 @@ const copy: Record<Language, Copy> = {
     summary:
       "Invita a tu gente, pronostica cada partido y usa un sistema de puntos que se ajuste a la forma en que compite tu grupo.",
     actions: {
-      createGroup: "Crear grupo",
+      createGroup: "Crear lobby",
       joinGroup: "Unirse con código"
     },
     match: {
@@ -580,6 +606,16 @@ const copy: Record<Language, Copy> = {
       joinError: "No se pudo unir a ese lobby en este momento.",
       alreadyInGroup: "Ya estás en este grupo.",
       notFound: "No se pudo encontrar ese grupo."
+    },
+    myLobbiesPage: {
+      title: "Mis lobbies",
+      aria: "Tus lobbies de pronósticos",
+      loading: "Cargando tus lobbies...",
+      error: "Tus lobbies no están disponibles en este momento.",
+      empty: "Todavía no estás en ningún lobby.",
+      openLobby: "Abrir lobby",
+      groupCode: "Código del grupo",
+      members: "Miembros"
     }
   }
 };
@@ -610,6 +646,10 @@ const getCurrentPage = (): Page => {
 
   if (document.body.dataset.page === "lobby" || window.location.pathname.endsWith("/lobby.html")) {
     return "lobby";
+  }
+
+  if (document.body.dataset.page === "my-lobbies" || window.location.pathname.endsWith("/my-lobbies.html")) {
+    return "my-lobbies";
   }
 
   return "home";
@@ -1100,6 +1140,43 @@ const renderLobbyPage = (selectedCopy: Copy) => {
   `;
 };
 
+const renderMyLobbiesPage = (selectedCopy: Copy) => `
+  <section class="my-lobbies-section" id="my-lobbies" aria-label="${selectedCopy.myLobbiesPage.aria}">
+    <div class="section-heading">
+      <p class="eyebrow">FIFA World Cup 2026</p>
+      <h2>${selectedCopy.myLobbiesPage.title}</h2>
+    </div>
+    ${
+      isUserLobbiesLoading
+        ? `<div class="matches-state">${selectedCopy.myLobbiesPage.loading}</div>`
+        : userLobbiesError
+          ? `<div class="matches-state">${selectedCopy.myLobbiesPage.error}</div>`
+          : userLobbies.length === 0
+            ? `<div class="matches-state">${selectedCopy.myLobbiesPage.empty}</div>`
+            : `
+              <div class="my-lobbies-list">
+                ${userLobbies
+                  .map(
+                    (lobby) => `
+                      <a class="my-lobby-card" href="/lobby.html?code=${encodeURIComponent(lobby.code)}">
+                        <span>
+                          <strong>${lobby.name}</strong>
+                          <small>${selectedCopy.myLobbiesPage.groupCode}: ${lobby.code}</small>
+                        </span>
+                        <span class="my-lobby-meta">
+                          <span>${lobby.members.length} ${selectedCopy.myLobbiesPage.members}</span>
+                          <strong>${selectedCopy.myLobbiesPage.openLobby}</strong>
+                        </span>
+                      </a>
+                    `
+                  )
+                  .join("")}
+              </div>
+            `
+    }
+  </section>
+`;
+
 const renderJoinLobbyModal = (selectedCopy: Copy) => {
   if (!joinLobbyModal.isOpen) {
     return "";
@@ -1227,6 +1304,7 @@ const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | und
       <a href="/groups.html">${selectedCopy.nav.groups}</a>
       <a href="/bracket.html">${selectedCopy.nav.bracket}</a>
       <a href="/matches.html">${selectedCopy.nav.matches}</a>
+      ${currentUser ? `<a href="/my-lobbies.html">${selectedCopy.nav.myLobbies}</a>` : ""}
     </nav>
     <div class="topbar-actions">
       <div class="language-control">
@@ -1327,7 +1405,8 @@ const render = (language: Language) => {
     groups: renderStandings(selectedCopy, language),
     home: renderHomePage(selectedCopy, language),
     lobby: renderLobbyPage(selectedCopy),
-    matches: renderMatchesPage(selectedCopy, language)
+    matches: renderMatchesPage(selectedCopy, language),
+    "my-lobbies": renderMyLobbiesPage(selectedCopy)
   }[currentPage];
 
   document.documentElement.lang = language;
@@ -1734,8 +1813,43 @@ const loadLobby = async () => {
   }
 };
 
+const loadUserLobbies = async () => {
+  if (getCurrentPage() !== "my-lobbies") {
+    return;
+  }
+
+  const user = await getAuthenticatedUser();
+
+  if (!user) {
+    return;
+  }
+
+  isUserLobbiesLoading = true;
+  userLobbiesError = null;
+  userLobbies = [];
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/users/${user.id}/lobbies`);
+
+    if (!response.ok) {
+      throw new Error("Could not load user lobbies.");
+    }
+
+    const result = (await response.json()) as { lobbies?: Lobby[] };
+    userLobbies = Array.isArray(result.lobbies) ? result.lobbies : [];
+  } catch {
+    userLobbies = [];
+    userLobbiesError = "unavailable";
+  } finally {
+    isUserLobbiesLoading = false;
+    render(getStoredLanguage());
+  }
+};
+
 render(getStoredLanguage());
 void loadCurrentUser();
 void loadCarouselMatches();
 void loadAllMatches();
 void loadLobby();
+void loadUserLobbies();

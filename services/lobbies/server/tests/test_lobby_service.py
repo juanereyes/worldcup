@@ -15,6 +15,7 @@ from lobby_service.database import (
     create_lobby,
     get_lobby,
     initialize_database,
+    list_user_lobbies,
 )
 
 
@@ -112,6 +113,32 @@ class LobbyServiceTest(unittest.TestCase):
                     created_by_username="ana",
                     max_attempts=1,
                 )
+
+    def test_list_user_lobbies_returns_only_memberships(self) -> None:
+        first = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+            name="First",
+        )
+        second = create_lobby(
+            self.connection,
+            created_by_user_id=2,
+            created_by_username="ana",
+            name="Second",
+        )
+
+        add_lobby_member(
+            self.connection,
+            code=second.code,
+            user_id=1,
+            username="juan",
+        )
+
+        lobbies = list_user_lobbies(self.connection, 1)
+
+        self.assertEqual({lobby.code for lobby in lobbies}, {first.code, second.code})
+        self.assertEqual(list_user_lobbies(self.connection, 99), [])
 
 
 if __name__ == "__main__":

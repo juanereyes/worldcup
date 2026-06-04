@@ -197,3 +197,18 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
             for row in rows
         ],
     )
+
+
+def list_user_lobbies(connection: sqlite3.Connection, user_id: int) -> list[LobbyRecord]:
+    rows = connection.execute(
+        """
+        SELECT lobbies.code
+        FROM lobby_members
+        JOIN lobbies ON lobbies.code = lobby_members.lobby_code
+        WHERE lobby_members.user_id = ?
+        ORDER BY lobby_members.joined_at DESC
+        """,
+        (user_id,),
+    ).fetchall()
+
+    return [get_lobby(connection, str(row["code"])) for row in rows]
