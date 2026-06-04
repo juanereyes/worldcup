@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from lobby_service.database import (
     InvalidLobbyPasswordCredentialsError,
@@ -29,6 +32,48 @@ from lobby_service.database import (
 HOST = "127.0.0.1"
 PORT = 8003
 ALLOWED_ORIGINS = {"http://127.0.0.1:5173"}
+AUTH_SESSION_URL = os.environ.get("AUTH_SESSION_URL", "http://127.0.0.1:8001/session")
+
+
+class AuthenticationError(ValueError):
+    pass
+
+
+def validate_auth_session(cookie_header: str) -> dict[str, Any]:
+    if not cookie_header:
+        raise AuthenticationError("Authentication is required.")
+
+    request = Request(
+        AUTH_SESSION_URL,
+        headers={"Cookie": cookie_header},
+        method="GET",
+    )
+
+    try:
+        with urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        if error.code == 401:
+            raise AuthenticationError("Authentication is required.") from error
+
+        raise AuthenticationError("Could not validate authentication.") from error
+    except (OSError, URLError, json.JSONDecodeError) as error:
+        raise AuthenticationError("Could not validate authentication.") from error
+
+    user = payload.get("user") if isinstance(payload, dict) else None
+
+    if not isinstance(user, dict):
+        raise AuthenticationError("Authentication is required.")
+
+    try:
+        user_id = int(user.get("id", 0))
+    except (TypeError, ValueError) as error:
+        raise AuthenticationError("Authentication is required.") from error
+
+    if user_id <= 0:
+        raise AuthenticationError("Authentication is required.")
+
+    return user
 
 
 class LobbyRequestHandler(BaseHTTPRequestHandler):
@@ -193,7 +238,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         path_parts = [part for part in parsed.path.split("/") if part]
 
         if len(path_parts) == 2 and path_parts[0] == "lobbies":
-            self.delete_lobby(path_parts[1], parsed.query)
+            self.delete_lobby(path_parts[1])
             return
 
         if len(path_parts) != 4 or path_parts[0] != "lobbies" or path_parts[2] != "members":
@@ -210,9 +255,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             initialize_database(connection)
 
             try:
-                acting_user_id = self.get_query_user_id(parsed.query, "actingUserId")
+                authenticated_user = self.get_authenticated_user()
+                authenticated_user_id = int(authenticated_user["id"])
 
-                if acting_user_id is None or acting_user_id == user_id:
+                if authenticated_user_id == user_id:
                     remove_lobby_member(
                         connection,
                         code=path_parts[1],
@@ -222,9 +268,12 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     remove_lobby_member_by_admin(
                         connection,
                         code=path_parts[1],
-                        acting_user_id=acting_user_id,
+                        acting_user_id=authenticated_user_id,
                         target_user_id=user_id,
                     )
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
             except LobbyNotFoundError as error:
                 self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
                 return
@@ -237,22 +286,20 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
         self.send_json(200, {"status": "removed"})
 
-    def delete_lobby(self, code: str, query: str) -> None:
-        acting_user_id = self.get_query_user_id(query, "actingUserId")
-
-        if acting_user_id is None:
-            self.send_json(400, {"error": "Acting user id is required."})
-            return
-
+    def delete_lobby(self, code: str) -> None:
         with connect() as connection:
             initialize_database(connection)
 
             try:
+                authenticated_user = self.get_authenticated_user()
                 delete_lobby(
                     connection,
                     code=code,
-                    acting_user_id=acting_user_id,
+                    acting_user_id=int(authenticated_user["id"]),
                 )
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
             except LobbyNotFoundError as error:
                 self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
                 return
@@ -262,18 +309,8 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
         self.send_json(200, {"status": "deleted"})
 
-    def get_query_user_id(self, query: str, key: str) -> int | None:
-        values = parse_qs(query).get(key)
-
-        if not values:
-            return None
-
-        try:
-            user_id = int(values[0])
-        except (TypeError, ValueError):
-            return None
-
-        return user_id if user_id > 0 else None
+    def get_authenticated_user(self) -> dict[str, Any]:
+        return validate_auth_session(self.headers.get("Cookie", ""))
 
     def read_json_body(self) -> dict[str, Any] | None:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -300,6 +337,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         allowed_origin = origin if origin in ALLOWED_ORIGINS else "http://127.0.0.1:5173"
 
         self.send_header("Access-Control-Allow-Origin", allowed_origin)
+        self.send_header("Access-Control-Allow-Credentials", "true")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 

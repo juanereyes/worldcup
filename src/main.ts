@@ -2338,7 +2338,8 @@ const leaveCurrentLobby = async (selectedCopy: Copy) => {
 
   try {
     const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}/members/${user.id}`, {
-      method: "DELETE"
+      method: "DELETE",
+      credentials: "include"
     });
 
     if (!response.ok) {
@@ -2388,12 +2389,10 @@ const kickLobbyMember = async (selectedCopy: Copy) => {
   render(getStoredLanguage());
 
   try {
-    const response = await fetch(
-      `${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}/members/${member.userId}?actingUserId=${user.id}`,
-      {
-        method: "DELETE"
-      }
-    );
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}/members/${member.userId}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
 
     if (!response.ok) {
       throw new Error("Could not kick member.");
@@ -2437,8 +2436,9 @@ const deleteCurrentLobby = async (selectedCopy: Copy) => {
   render(getStoredLanguage());
 
   try {
-    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}?actingUserId=${user.id}`, {
-      method: "DELETE"
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}`, {
+      method: "DELETE",
+      credentials: "include"
     });
 
     if (!response.ok) {
