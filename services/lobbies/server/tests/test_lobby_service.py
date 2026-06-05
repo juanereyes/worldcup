@@ -25,6 +25,7 @@ from lobby_service.database import (
     create_lobby,
     delete_lobby,
     get_lobby,
+    get_lobby_for_member,
     initialize_database,
     list_default_match_predictions,
     list_user_lobbies,
@@ -268,6 +269,19 @@ class LobbyServiceTest(unittest.TestCase):
 
         self.assertEqual({lobby.code for lobby in lobbies}, {first.code, second.code})
         self.assertEqual(list_user_lobbies(self.connection, 99), [])
+
+    def test_get_lobby_for_member_requires_membership(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+
+        visible_lobby = get_lobby_for_member(self.connection, code=lobby.code, user_id=1)
+
+        self.assertEqual(visible_lobby.code, lobby.code)
+        with self.assertRaises(LobbyPermissionError):
+            get_lobby_for_member(self.connection, code=lobby.code, user_id=99)
 
     def test_save_match_prediction_upserts_member_prediction(self) -> None:
         lobby = create_lobby(

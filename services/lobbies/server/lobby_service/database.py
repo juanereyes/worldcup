@@ -542,6 +542,16 @@ def list_user_lobbies(connection: sqlite3.Connection, user_id: int) -> list[Lobb
     return [get_lobby(connection, str(row["code"])) for row in rows]
 
 
+def get_lobby_for_member(connection: sqlite3.Connection, *, code: str, user_id: int) -> LobbyRecord:
+    normalized_code = code.strip().upper()
+    lobby = get_lobby(connection, normalized_code)
+
+    if not _is_lobby_member(connection, normalized_code, user_id):
+        raise LobbyPermissionError("Only lobby members can view this lobby.")
+
+    return lobby
+
+
 def list_match_predictions(
     connection: sqlite3.Connection,
     *,

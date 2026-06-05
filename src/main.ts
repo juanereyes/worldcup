@@ -4652,9 +4652,16 @@ const loadLobby = async () => {
   render(getStoredLanguage());
 
   try {
-    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}`);
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}`, {
+      credentials: "include"
+    });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        window.location.href = authClientUrl;
+        return;
+      }
+
       throw new Error("Could not load lobby.");
     }
 

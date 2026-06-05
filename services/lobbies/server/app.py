@@ -25,7 +25,7 @@ from lobby_service.database import (
     copy_default_predictions_to_lobby,
     create_lobby,
     delete_lobby,
-    get_lobby,
+    get_lobby_for_member,
     initialize_database,
     list_default_match_predictions,
     list_match_predictions,
@@ -107,9 +107,20 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 initialize_database(connection)
 
                 try:
-                    lobby = get_lobby(connection, path_parts[1])
+                    authenticated_user = self.get_authenticated_user()
+                    lobby = get_lobby_for_member(
+                        connection,
+                        code=path_parts[1],
+                        user_id=int(authenticated_user["id"]),
+                    )
+                except AuthenticationError as error:
+                    self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                    return
                 except LobbyNotFoundError as error:
                     self.send_json(404, {"error": str(error)})
+                    return
+                except LobbyPermissionError as error:
+                    self.send_json(403, {"code": "forbidden", "error": str(error)})
                     return
 
             self.send_json(200, {"lobby": self.lobby_payload(lobby)})
