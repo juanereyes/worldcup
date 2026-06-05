@@ -28,6 +28,7 @@ from lobby_service.database import (
     list_user_lobbies,
     remove_lobby_member,
     remove_lobby_member_by_admin,
+    set_lobby_custom_settings,
     set_lobby_point_system,
 )
 
@@ -243,6 +244,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             self.set_lobby_point_system(path_parts[1])
             return
 
+        if len(path_parts) == 3 and path_parts[0] == "lobbies" and path_parts[2] == "custom-settings":
+            self.set_lobby_custom_settings(path_parts[1])
+            return
+
         self.send_json(404, {"error": "Not found."})
 
     def set_lobby_point_system(self, code: str) -> None:
@@ -276,6 +281,42 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
             except InvalidPointSystemError as error:
                 self.send_json(400, {"code": "invalid_point_system", "error": str(error)})
+                return
+
+        self.send_json(200, {"lobby": self.lobby_payload(lobby)})
+
+    def set_lobby_custom_settings(self, code: str) -> None:
+        payload = self.read_json_body()
+
+        if payload is None:
+            self.send_json(400, {"error": "Request body must be valid JSON."})
+            return
+
+        settings = payload.get("settings")
+
+        if not isinstance(settings, dict):
+            self.send_json(400, {"code": "invalid_custom_settings", "error": "Custom settings are required."})
+            return
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                authenticated_user = self.get_authenticated_user()
+                lobby = set_lobby_custom_settings(
+                    connection,
+                    code=code,
+                    acting_user_id=int(authenticated_user["id"]),
+                    settings=settings,
+                )
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
                 return
 
         self.send_json(200, {"lobby": self.lobby_payload(lobby)})
@@ -395,6 +436,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             "requiresPassword": lobby.requires_password,
             "memberCount": lobby.member_count,
             "pointSystem": lobby.point_system,
+            "customSettings": lobby.custom_settings,
             "members": [
                 {
                     "userId": member.user_id,

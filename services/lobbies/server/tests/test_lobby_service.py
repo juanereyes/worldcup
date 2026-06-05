@@ -28,6 +28,7 @@ from lobby_service.database import (
     list_user_lobbies,
     remove_lobby_member,
     remove_lobby_member_by_admin,
+    set_lobby_custom_settings,
     set_lobby_point_system,
 )
 from lobby_service.scoring import (
@@ -469,6 +470,50 @@ class LobbyServiceTest(unittest.TestCase):
                 code=lobby.code,
                 acting_user_id=1,
                 point_system="chaos",
+            )
+
+    def test_admin_can_set_custom_settings(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        settings = {
+            "values": {"exactScore": "5"},
+            "enabledFields": {"exactScore": True},
+            "enabledFeatures": {"trackTeam": True},
+            "trackedTeam": "Colombia",
+        }
+
+        updated_lobby = set_lobby_custom_settings(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+            settings=settings,
+        )
+
+        self.assertEqual(updated_lobby.point_system, "custom")
+        self.assertEqual(updated_lobby.custom_settings, settings)
+
+    def test_non_admin_cannot_set_custom_settings(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        with self.assertRaises(LobbyPermissionError):
+            set_lobby_custom_settings(
+                self.connection,
+                code=lobby.code,
+                acting_user_id=2,
+                settings={"values": {}},
             )
 
     def test_simple_match_scoring(self) -> None:

@@ -42,7 +42,15 @@ type CurrentUser = {
   displayName: string;
 };
 
-type Page = "home" | "groups" | "matches" | "bracket" | "lobby" | "my-lobbies" | "point-system";
+type Page =
+  | "home"
+  | "groups"
+  | "matches"
+  | "bracket"
+  | "lobby"
+  | "my-lobbies"
+  | "point-system"
+  | "custom-settings";
 
 type PointSystemId = "simple" | "regular" | "custom";
 
@@ -54,6 +62,38 @@ type PointSystemOption = {
     title: string;
     items: string[];
   }>;
+};
+
+type CustomNumericFieldId =
+  | "exactScore"
+  | "resultGoalDifference"
+  | "correctResult"
+  | "homeGoal"
+  | "awayGoal"
+  | "champion"
+  | "runnerUp"
+  | "thirdPlace"
+  | "fourthPlace"
+  | "topScorer"
+  | "goldenBall"
+  | "favoritePlayerContributions"
+  | "favoritePlayerPoints"
+  | "roundOf32"
+  | "roundOf16"
+  | "quarterFinal"
+  | "semiFinal"
+  | "thirdPlaceMatch"
+  | "final";
+
+type CustomFeatureId = "chooseTeam" | "trackTeam" | "favoritePlayer" | "bracketHeavy";
+
+type CustomSettingsState = {
+  enabledFields: Record<CustomNumericFieldId, boolean>;
+  values: Record<CustomNumericFieldId, string>;
+  enabledFeatures: Record<CustomFeatureId, boolean>;
+  trackedTeam: string;
+  message: string | null;
+  isSubmitting: boolean;
 };
 
 type CarouselMatch = {
@@ -82,6 +122,12 @@ type Lobby = {
   requiresPassword: boolean;
   memberCount: number;
   pointSystem: PointSystemId | null;
+  customSettings?: {
+    enabledFields: Record<string, boolean>;
+    values: Record<string, string>;
+    enabledFeatures: Record<string, boolean>;
+    trackedTeam: string;
+  } | null;
   members: LobbyMember[];
 };
 
@@ -250,6 +296,24 @@ type Copy = {
     disclaimer: string;
     options: PointSystemOption[];
   };
+  customSettingsPage: {
+    title: string;
+    aria: string;
+    eyebrow: string;
+    summary: string;
+    missingCode: string;
+    matchSpecific: string;
+    global: string;
+    special: string;
+    bracketRounds: string;
+    save: string;
+    saveError: string;
+    validationError: string;
+    trackedTeamLabel: string;
+    trackedTeamPlaceholder: string;
+    fields: Record<CustomNumericFieldId, string>;
+    features: Record<CustomFeatureId, { label: string; detail: string }>;
+  };
   leaveLobby: {
     title: string;
     body: (name: string) => string;
@@ -294,6 +358,54 @@ const authClientUrl = "http://127.0.0.1:5174/";
 const authApiUrl = "http://127.0.0.1:8001";
 const matchesApiUrl = "http://127.0.0.1:8002";
 const lobbiesApiUrl = "http://127.0.0.1:8003";
+const defaultCustomSettingValues: Record<CustomNumericFieldId, string> = {
+  exactScore: "5",
+  resultGoalDifference: "4",
+  correctResult: "3",
+  homeGoal: "1",
+  awayGoal: "1",
+  champion: "20",
+  runnerUp: "12",
+  thirdPlace: "8",
+  fourthPlace: "6",
+  topScorer: "10",
+  goldenBall: "8",
+  favoritePlayerContributions: "3",
+  favoritePlayerPoints: "5",
+  roundOf32: "2",
+  roundOf16: "4",
+  quarterFinal: "6",
+  semiFinal: "8",
+  thirdPlaceMatch: "6",
+  final: "10"
+};
+const defaultCustomEnabledFields: Record<CustomNumericFieldId, boolean> = {
+  exactScore: true,
+  resultGoalDifference: true,
+  correctResult: true,
+  homeGoal: true,
+  awayGoal: true,
+  champion: true,
+  runnerUp: true,
+  thirdPlace: true,
+  fourthPlace: true,
+  topScorer: true,
+  goldenBall: true,
+  favoritePlayerContributions: true,
+  favoritePlayerPoints: true,
+  roundOf32: true,
+  roundOf16: true,
+  quarterFinal: true,
+  semiFinal: true,
+  thirdPlaceMatch: true,
+  final: true
+};
+const defaultCustomEnabledFeatures: Record<CustomFeatureId, boolean> = {
+  chooseTeam: false,
+  trackTeam: false,
+  favoritePlayer: false,
+  bracketHeavy: false
+};
 let currentUser: CurrentUser | null = null;
 let carouselMatches: CarouselMatch[] = [];
 let allMatches: CarouselMatch[] = [];
@@ -311,6 +423,16 @@ let userLobbiesError: string | null = null;
 let selectedPointSystem: PointSystemId | null = null;
 let selectedPointSystemLobbyCode: string | null = null;
 let pointSystemSetupError: string | null = null;
+let customSettingsLobbyCode: string | null = null;
+let customSettingsState: CustomSettingsState = {
+  enabledFields: { ...defaultCustomEnabledFields },
+  values: { ...defaultCustomSettingValues },
+  enabledFeatures: { ...defaultCustomEnabledFeatures },
+  trackedTeam: "",
+  message: null,
+  isSubmitting: false
+};
+let isTrackedTeamMenuOpen = false;
 let createLobbyModal: CreateLobbyModalState = {
   isOpen: false,
   name: "",
@@ -748,6 +870,65 @@ const copy: Record<Language, Copy> = {
         }
       ]
     },
+    customSettingsPage: {
+      title: "Customize scoring",
+      aria: "Custom lobby scoring settings",
+      eyebrow: "Custom setup",
+      summary: "Start from the Regular scoring values, then turn individual rules on or off and edit the point values your lobby will use.",
+      missingCode: "Choose Custom from a lobby setup before editing custom settings.",
+      matchSpecific: "Match Specific",
+      global: "Global",
+      special: "Special settings",
+      bracketRounds: "Bracket heavy rounds",
+      save: "Save custom settings",
+      saveError: "Could not save the custom settings right now.",
+      validationError: "Every enabled setting must be completed with a non-negative integer, and Track a team needs a country.",
+      trackedTeamLabel: "Tracked country",
+      trackedTeamPlaceholder: "Choose a country",
+      fields: {
+        exactScore: "Exact score",
+        resultGoalDifference: "Correct result + goal difference",
+        correctResult: "Correct result",
+        homeGoal: "Wrong result + correct home goals",
+        awayGoal: "Wrong result + correct away goals",
+        champion: "Champion",
+        runnerUp: "Runner-up",
+        thirdPlace: "Third place",
+        fourthPlace: "Fourth place",
+        topScorer: "Top scorer",
+        goldenBall: "Golden Ball",
+        favoritePlayerContributions: "Goal contributions per award",
+        favoritePlayerPoints: "Points per award",
+        roundOf32: "Round of 32",
+        roundOf16: "Round of 16",
+        quarterFinal: "Quarterfinal",
+        semiFinal: "Semifinal",
+        thirdPlaceMatch: "Third place match",
+        final: "Final"
+      },
+      features: {
+        chooseTeam: {
+          label: "Choose your team",
+          detail:
+            "At the start of the game, each player chooses one country to root for. Every match where that team plays has its points doubled. This must be filled before the player's global prediction window closes."
+        },
+        trackTeam: {
+          label: "Track a team",
+          detail:
+            "The admin chooses one country to track through the tournament. Players predict how far that country will go. The admin must choose the tracked country during lobby setup; players answer before their global prediction window closes."
+        },
+        favoritePlayer: {
+          label: "Favorite player",
+          detail:
+            "At the start of the game, each player chooses one player. Points are awarded every time that player reaches the configured goals plus assists threshold. Player choices close with the global prediction window."
+        },
+        bracketHeavy: {
+          label: "Bracket heavy",
+          detail:
+            "After the group stage and before the Round of 32 starts, players predict who advances in every knockout match. Later rounds are correct only if the previous matchup was also predicted correctly, and later stages can award more points."
+        }
+      }
+    },
     leaveLobby: {
       title: "Leave lobby",
       body: (name) => `Are you sure you want to leave ${name}?`,
@@ -978,6 +1159,65 @@ const copy: Record<Language, Copy> = {
         }
       ]
     },
+    customSettingsPage: {
+      title: "Personaliza el puntaje",
+      aria: "Configuración personalizada de puntaje del lobby",
+      eyebrow: "Configuración personalizada",
+      summary: "Empieza con los valores del sistema Regular, luego activa o desactiva reglas individuales y edita los puntos que usará tu lobby.",
+      missingCode: "Elige Personalizado desde la configuración de un lobby antes de editar estos ajustes.",
+      matchSpecific: "Específico por partido",
+      global: "Global",
+      special: "Ajustes especiales",
+      bracketRounds: "Rondas de llave pesada",
+      save: "Guardar ajustes personalizados",
+      saveError: "No se pudieron guardar los ajustes personalizados en este momento.",
+      validationError: "Cada ajuste activo debe completarse con un entero no negativo, y Sigue un equipo necesita un país.",
+      trackedTeamLabel: "País a seguir",
+      trackedTeamPlaceholder: "Elige un país",
+      fields: {
+        exactScore: "Marcador exacto",
+        resultGoalDifference: "Resultado correcto + diferencia de gol",
+        correctResult: "Resultado correcto",
+        homeGoal: "Resultado incorrecto + goles del local correctos",
+        awayGoal: "Resultado incorrecto + goles del visitante correctos",
+        champion: "Campeón",
+        runnerUp: "Subcampeón",
+        thirdPlace: "Tercer lugar",
+        fourthPlace: "Cuarto lugar",
+        topScorer: "Goleador",
+        goldenBall: "Balón de Oro",
+        favoritePlayerContributions: "Contribuciones de gol por premio",
+        favoritePlayerPoints: "Puntos por premio",
+        roundOf32: "Ronda de 32",
+        roundOf16: "Ronda de 16",
+        quarterFinal: "Cuartos de final",
+        semiFinal: "Semifinal",
+        thirdPlaceMatch: "Partido por tercer lugar",
+        final: "Final"
+      },
+      features: {
+        chooseTeam: {
+          label: "Elige tu equipo",
+          detail:
+            "Al inicio del juego, cada jugador elige un país para apoyar. Cada partido donde juegue ese equipo tendrá sus puntos duplicados. Esto debe completarse antes de que cierre la ventana global del jugador."
+        },
+        trackTeam: {
+          label: "Sigue un equipo",
+          detail:
+            "El admin elige un país para seguir durante el torneo. Los jugadores predicen hasta dónde llegará ese país. El admin debe elegir el país durante la configuración del lobby; los jugadores responden antes de que cierre su ventana global."
+        },
+        favoritePlayer: {
+          label: "Jugador favorito",
+          detail:
+            "Al inicio del juego, cada jugador elige un jugador. Se otorgan puntos cada vez que ese jugador alcanza la cantidad configurada de goles más asistencias. La elección cierra con la ventana global."
+        },
+        bracketHeavy: {
+          label: "Llave pesada",
+          detail:
+            "Después de la fase de grupos y antes de que empiece la Ronda de 32, los jugadores predicen quién avanza en cada partido de eliminación. En rondas posteriores, el acierto cuenta solo si el cruce previo también fue predicho correctamente."
+        }
+      }
+    },
     leaveLobby: {
       title: "Salir del lobby",
       body: (name) => `¿Seguro que quieres salir de ${name}?`,
@@ -1039,6 +1279,13 @@ const getCurrentPage = (): Page => {
     return "point-system";
   }
 
+  if (
+    document.body.dataset.page === "custom-settings" ||
+    window.location.pathname.endsWith("/custom-settings.html")
+  ) {
+    return "custom-settings";
+  }
+
   if (document.body.dataset.page === "my-lobbies" || window.location.pathname.endsWith("/my-lobbies.html")) {
     return "my-lobbies";
   }
@@ -1053,6 +1300,41 @@ const getLobbyCodeFromUrl = () => {
 };
 
 const getPointSystemStorageKey = (code: string) => `worldcup-point-system-${code}`;
+const getCustomSettingsStorageKey = (code: string) => `worldcup-custom-settings-${code}`;
+
+const matchSpecificCustomFields: CustomNumericFieldId[] = [
+  "exactScore",
+  "resultGoalDifference",
+  "correctResult",
+  "homeGoal",
+  "awayGoal"
+];
+const globalCustomFields: CustomNumericFieldId[] = [
+  "champion",
+  "runnerUp",
+  "thirdPlace",
+  "fourthPlace",
+  "topScorer",
+  "goldenBall"
+];
+const favoritePlayerCustomFields: CustomNumericFieldId[] = ["favoritePlayerContributions", "favoritePlayerPoints"];
+const bracketHeavyCustomFields: CustomNumericFieldId[] = [
+  "roundOf32",
+  "roundOf16",
+  "quarterFinal",
+  "semiFinal",
+  "thirdPlaceMatch",
+  "final"
+];
+
+const getParticipatingTeams = (language: Language) =>
+  worldCupGroups
+    .flatMap((group) => group.teams)
+    .sort((a, b) => a.team[language].localeCompare(b.team[language], language));
+
+const sanitizeNonNegativeIntegerInput = (value: string) => value.replace(/\D/g, "").replace(/^0+(\d)/, "$1");
+
+const isNonNegativeIntegerValue = (value: string) => /^(0|[1-9]\d*)$/.test(value);
 
 const isLobbyPasswordValid = (password: string) =>
   password.length >= 8 &&
@@ -1674,6 +1956,155 @@ const renderPointSystemPage = (selectedCopy: Copy) => {
   `;
 };
 
+const renderCustomNumberField = (selectedCopy: Copy, field: CustomNumericFieldId) => {
+  const isEnabled = customSettingsState.enabledFields[field];
+
+  return `
+    <label class="custom-setting-row">
+      <span class="custom-setting-toggle">
+        <input type="checkbox" data-custom-field-toggle="${field}" ${isEnabled ? "checked" : ""} />
+      </span>
+      <span class="custom-setting-label">${selectedCopy.customSettingsPage.fields[field]}</span>
+      <input
+        class="custom-setting-input"
+        type="text"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        data-custom-field-value="${field}"
+        value="${customSettingsState.values[field]}"
+        ${isEnabled ? "" : "disabled"}
+      />
+    </label>
+  `;
+};
+
+const renderCustomFeatureHeader = (selectedCopy: Copy, feature: CustomFeatureId) => `
+  <label class="custom-feature-header">
+    <span class="custom-setting-toggle">
+      <input type="checkbox" data-custom-feature-toggle="${feature}" ${customSettingsState.enabledFeatures[feature] ? "checked" : ""} />
+    </span>
+    <span>${selectedCopy.customSettingsPage.features[feature].label}</span>
+    <span class="info-tooltip" tabindex="0" aria-label="${selectedCopy.customSettingsPage.features[feature].detail}">
+      !
+      <span role="tooltip">${selectedCopy.customSettingsPage.features[feature].detail}</span>
+    </span>
+  </label>
+`;
+
+const renderTrackedTeamDropdown = (selectedCopy: Copy, language: Language) => {
+  const teams = getParticipatingTeams(language);
+  const selectedTeam = teams.find((team) => team.team.en === customSettingsState.trackedTeam);
+
+  return `
+    <div class="tracked-team-control">
+      <span>${selectedCopy.customSettingsPage.trackedTeamLabel}</span>
+      <button
+        class="tracked-team-trigger"
+        type="button"
+        id="tracked-team-trigger"
+        aria-expanded="${isTrackedTeamMenuOpen ? "true" : "false"}"
+      >
+        ${
+          selectedTeam
+            ? `<img src="${selectedTeam.flagSrc}" alt="${selectedTeam.flagAlt[language]}" /><span>${selectedTeam.team[language]}</span>`
+            : `<span>${selectedCopy.customSettingsPage.trackedTeamPlaceholder}</span>`
+        }
+      </button>
+      <div class="tracked-team-menu" id="tracked-team-menu" ${isTrackedTeamMenuOpen ? "" : "hidden"}>
+        ${teams
+          .map(
+            (team) => `
+              <button type="button" data-tracked-team="${team.team.en}">
+                <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
+                <span>${team.team[language]}</span>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+};
+
+const renderCustomSettingsPage = (selectedCopy: Copy, language: Language) => {
+  const lobbyCode = getLobbyCodeFromUrl();
+
+  return `
+    <section class="custom-settings-section" id="custom-settings" aria-label="${selectedCopy.customSettingsPage.aria}">
+      <div class="section-heading">
+        <p class="eyebrow">${selectedCopy.customSettingsPage.eyebrow}</p>
+        <h2>${selectedCopy.customSettingsPage.title}</h2>
+        <p>${selectedCopy.customSettingsPage.summary}</p>
+      </div>
+      ${
+        !lobbyCode
+          ? `<div class="matches-state">${selectedCopy.customSettingsPage.missingCode}</div>`
+          : `
+            <div class="custom-settings-layout">
+              <section class="custom-settings-card">
+                <h3>${selectedCopy.customSettingsPage.matchSpecific}</h3>
+                <div class="custom-settings-list">
+                  ${matchSpecificCustomFields.map((field) => renderCustomNumberField(selectedCopy, field)).join("")}
+                </div>
+              </section>
+              <section class="custom-settings-card">
+                <h3>${selectedCopy.customSettingsPage.global}</h3>
+                <div class="custom-settings-list">
+                  ${globalCustomFields.map((field) => renderCustomNumberField(selectedCopy, field)).join("")}
+                </div>
+              </section>
+              <section class="custom-settings-card custom-settings-wide">
+                <h3>${selectedCopy.customSettingsPage.special}</h3>
+                <div class="custom-feature-list">
+                  <div class="custom-feature-block">
+                    ${renderCustomFeatureHeader(selectedCopy, "chooseTeam")}
+                  </div>
+                  <div class="custom-feature-block">
+                    ${renderCustomFeatureHeader(selectedCopy, "trackTeam")}
+                    ${
+                      customSettingsState.enabledFeatures.trackTeam
+                        ? renderTrackedTeamDropdown(selectedCopy, language)
+                        : ""
+                    }
+                  </div>
+                  <div class="custom-feature-block">
+                    ${renderCustomFeatureHeader(selectedCopy, "favoritePlayer")}
+                    ${
+                      customSettingsState.enabledFeatures.favoritePlayer
+                        ? `<div class="custom-settings-list compact-custom-list">
+                            ${favoritePlayerCustomFields.map((field) => renderCustomNumberField(selectedCopy, field)).join("")}
+                          </div>`
+                        : ""
+                    }
+                  </div>
+                  <div class="custom-feature-block">
+                    ${renderCustomFeatureHeader(selectedCopy, "bracketHeavy")}
+                    ${
+                      customSettingsState.enabledFeatures.bracketHeavy
+                        ? `<div class="custom-bracket-settings">
+                            <strong>${selectedCopy.customSettingsPage.bracketRounds}</strong>
+                            <div class="custom-settings-list compact-custom-list">
+                              ${bracketHeavyCustomFields.map((field) => renderCustomNumberField(selectedCopy, field)).join("")}
+                            </div>
+                          </div>`
+                        : ""
+                    }
+                  </div>
+                </div>
+              </section>
+            </div>
+            ${customSettingsState.message ? `<p class="join-lobby-message">${customSettingsState.message}</p>` : ""}
+            <div class="point-system-footer">
+              <button class="primary-action" type="button" id="custom-settings-save" ${customSettingsState.isSubmitting ? "disabled" : ""}>
+                ${selectedCopy.customSettingsPage.save}
+              </button>
+            </div>
+          `
+      }
+    </section>
+  `;
+};
+
 const renderCreateLobbyModal = (selectedCopy: Copy) => {
   if (!createLobbyModal.isOpen) {
     return "";
@@ -2089,8 +2520,61 @@ const render = (language: Language) => {
     }
   }
 
+  if (currentPage === "custom-settings") {
+    const lobbyCode = getLobbyCodeFromUrl();
+
+    if (customSettingsLobbyCode !== lobbyCode) {
+      const storedSettings = lobbyCode ? window.localStorage.getItem(getCustomSettingsStorageKey(lobbyCode)) : null;
+
+      if (storedSettings) {
+        try {
+          const parsed = JSON.parse(storedSettings) as Partial<CustomSettingsState>;
+
+          customSettingsState = {
+            enabledFields: {
+              ...defaultCustomEnabledFields,
+              ...(parsed.enabledFields ?? {})
+            },
+            values: {
+              ...defaultCustomSettingValues,
+              ...(parsed.values ?? {})
+            },
+            enabledFeatures: {
+              ...defaultCustomEnabledFeatures,
+              ...(parsed.enabledFeatures ?? {})
+            },
+            trackedTeam: typeof parsed.trackedTeam === "string" ? parsed.trackedTeam : "",
+            message: null,
+            isSubmitting: false
+          };
+        } catch {
+          customSettingsState = {
+            enabledFields: { ...defaultCustomEnabledFields },
+            values: { ...defaultCustomSettingValues },
+            enabledFeatures: { ...defaultCustomEnabledFeatures },
+            trackedTeam: "",
+            message: null,
+            isSubmitting: false
+          };
+        }
+      } else {
+        customSettingsState = {
+          enabledFields: { ...defaultCustomEnabledFields },
+          values: { ...defaultCustomSettingValues },
+          enabledFeatures: { ...defaultCustomEnabledFeatures },
+          trackedTeam: "",
+          message: null,
+          isSubmitting: false
+        };
+      }
+
+      customSettingsLobbyCode = lobbyCode;
+    }
+  }
+
   const pageContent = {
     bracket: renderBracketPage(selectedCopy, language),
+    "custom-settings": renderCustomSettingsPage(selectedCopy, language),
     groups: renderStandings(selectedCopy, language),
     home: renderHomePage(selectedCopy, language),
     lobby: renderLobbyPage(selectedCopy),
@@ -2149,6 +2633,13 @@ const render = (language: Language) => {
   const deleteLobbyConfirmButton = document.querySelector<HTMLButtonElement>("#delete-lobby-confirm");
   const pointSystemButtons = document.querySelectorAll<HTMLButtonElement>("[data-point-system]");
   const pointSystemContinueButton = document.querySelector<HTMLButtonElement>("#point-system-continue");
+  const customFieldToggles = document.querySelectorAll<HTMLInputElement>("[data-custom-field-toggle]");
+  const customFieldInputs = document.querySelectorAll<HTMLInputElement>("[data-custom-field-value]");
+  const customFeatureToggles = document.querySelectorAll<HTMLInputElement>("[data-custom-feature-toggle]");
+  const trackedTeamTrigger = document.querySelector<HTMLButtonElement>("#tracked-team-trigger");
+  const trackedTeamMenu = document.querySelector<HTMLDivElement>("#tracked-team-menu");
+  const trackedTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-tracked-team]");
+  const customSettingsSaveButton = document.querySelector<HTMLButtonElement>("#custom-settings-save");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -2247,7 +2738,125 @@ const render = (language: Language) => {
   });
 
   pointSystemContinueButton?.addEventListener("click", () => {
+    if (selectedPointSystem === "custom") {
+      const lobbyCode = getLobbyCodeFromUrl();
+
+      if (lobbyCode) {
+        window.location.href = `/custom-settings.html?code=${encodeURIComponent(lobbyCode)}`;
+      }
+
+      return;
+    }
+
     void savePointSystemSelection(selectedCopy);
+  });
+
+  customFieldToggles.forEach((toggle) => {
+    toggle.addEventListener("change", () => {
+      const field = toggle.dataset.customFieldToggle as CustomNumericFieldId | undefined;
+
+      if (!field) {
+        return;
+      }
+
+      customSettingsState = {
+        ...customSettingsState,
+        enabledFields: {
+          ...customSettingsState.enabledFields,
+          [field]: toggle.checked
+        },
+        message: null
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  customFieldInputs.forEach((input) => {
+    input.addEventListener("input", () => {
+      const field = input.dataset.customFieldValue as CustomNumericFieldId | undefined;
+
+      if (!field) {
+        return;
+      }
+
+      const nextValue = sanitizeNonNegativeIntegerInput(input.value);
+      input.value = nextValue;
+      customSettingsState = {
+        ...customSettingsState,
+        values: {
+          ...customSettingsState.values,
+          [field]: nextValue
+        },
+        message: null
+      };
+    });
+  });
+
+  customFeatureToggles.forEach((toggle) => {
+    toggle.addEventListener("change", () => {
+      const feature = toggle.dataset.customFeatureToggle as CustomFeatureId | undefined;
+
+      if (!feature) {
+        return;
+      }
+
+      customSettingsState = {
+        ...customSettingsState,
+        enabledFeatures: {
+          ...customSettingsState.enabledFeatures,
+          [feature]: toggle.checked
+        },
+        message: null
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  trackedTeamTrigger?.addEventListener("click", () => {
+    isTrackedTeamMenuOpen = !isTrackedTeamMenuOpen;
+    render(getStoredLanguage());
+  });
+
+  trackedTeamTrigger?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  trackedTeamMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  trackedTeamMenu?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      isTrackedTeamMenuOpen = false;
+      render(getStoredLanguage());
+    }
+  });
+
+  trackedTeamButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      customSettingsState = {
+        ...customSettingsState,
+        trackedTeam: button.dataset.trackedTeam ?? "",
+        message: null
+      };
+      isTrackedTeamMenuOpen = false;
+      render(getStoredLanguage());
+    });
+  });
+
+  if (isTrackedTeamMenuOpen) {
+    document.addEventListener(
+      "click",
+      () => {
+        isTrackedTeamMenuOpen = false;
+        render(getStoredLanguage());
+      },
+      { once: true }
+    );
+  }
+
+  customSettingsSaveButton?.addEventListener("click", () => {
+    void saveCustomSettings(selectedCopy);
   });
 
   createLobbyButton?.addEventListener("click", () => {
@@ -2655,6 +3264,92 @@ const savePointSystemSelection = async (selectedCopy: Copy) => {
     window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
   } catch {
     pointSystemSetupError = selectedCopy.pointSystemPage.saveError;
+    render(getStoredLanguage());
+  }
+};
+
+const getRequiredCustomFields = () => [
+  ...matchSpecificCustomFields,
+  ...globalCustomFields,
+  ...(customSettingsState.enabledFeatures.favoritePlayer ? favoritePlayerCustomFields : []),
+  ...(customSettingsState.enabledFeatures.bracketHeavy ? bracketHeavyCustomFields : [])
+];
+
+const areCustomSettingsValid = () => {
+  const requiredFields = getRequiredCustomFields();
+  const hasInvalidNumber = requiredFields.some(
+    (field) => customSettingsState.enabledFields[field] && !isNonNegativeIntegerValue(customSettingsState.values[field])
+  );
+
+  if (hasInvalidNumber) {
+    return false;
+  }
+
+  if (customSettingsState.enabledFeatures.trackTeam) {
+    const trackedTeamNames = new Set(worldCupGroups.flatMap((group) => group.teams.map((team) => team.team.en)));
+
+    if (!trackedTeamNames.has(customSettingsState.trackedTeam)) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const saveCustomSettings = async (selectedCopy: Copy) => {
+  const lobbyCode = getLobbyCodeFromUrl();
+
+  if (!lobbyCode) {
+    return;
+  }
+
+  if (!areCustomSettingsValid()) {
+    customSettingsState = {
+      ...customSettingsState,
+      message: selectedCopy.customSettingsPage.validationError
+    };
+    render(getStoredLanguage());
+    return;
+  }
+
+  customSettingsState = {
+    ...customSettingsState,
+    message: null,
+    isSubmitting: true
+  };
+  render(getStoredLanguage());
+
+  try {
+    const settings = {
+      enabledFields: customSettingsState.enabledFields,
+      values: customSettingsState.values,
+      enabledFeatures: customSettingsState.enabledFeatures,
+      trackedTeam: customSettingsState.trackedTeam
+    };
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/custom-settings`, {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        settings
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not save custom point system.");
+    }
+
+    window.localStorage.setItem(getPointSystemStorageKey(lobbyCode), "custom");
+    window.localStorage.setItem(getCustomSettingsStorageKey(lobbyCode), JSON.stringify(settings));
+    window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
+  } catch {
+    customSettingsState = {
+      ...customSettingsState,
+      message: selectedCopy.customSettingsPage.saveError,
+      isSubmitting: false
+    };
     render(getStoredLanguage());
   }
 };

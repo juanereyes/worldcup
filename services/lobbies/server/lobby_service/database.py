@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import json
 import secrets
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
@@ -72,6 +74,7 @@ class LobbyRecord:
     requires_password: bool
     member_count: int
     point_system: str | None
+    custom_settings: dict[str, Any] | None
     members: list[LobbyMemberRecord]
 
 
@@ -99,6 +102,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           password_hash TEXT,
           member_count INTEGER NOT NULL DEFAULT 0,
           point_system TEXT CHECK (point_system IN ('simple', 'regular', 'custom')),
+          custom_settings_json TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -118,6 +122,9 @@ def initialize_database(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE lobbies ADD COLUMN point_system TEXT CHECK (point_system IN ('simple', 'regular', 'custom'))"
         )
+
+    if "custom_settings_json" not in columns:
+        connection.execute("ALTER TABLE lobbies ADD COLUMN custom_settings_json TEXT")
 
     connection.execute(
         """
@@ -395,11 +402,37 @@ def set_lobby_point_system(
     return get_lobby(connection, normalized_code)
 
 
+def set_lobby_custom_settings(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    acting_user_id: int,
+    settings: dict[str, Any],
+) -> LobbyRecord:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_admin(connection, normalized_code, acting_user_id):
+        raise LobbyPermissionError("Only lobby admins can choose custom settings.")
+
+    connection.execute(
+        """
+        UPDATE lobbies
+        SET point_system = 'custom', custom_settings_json = ?
+        WHERE code = ?
+        """,
+        (json.dumps(settings, sort_keys=True), normalized_code),
+    )
+    connection.commit()
+
+    return get_lobby(connection, normalized_code)
+
+
 def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
     normalized_code = code.strip().upper()
     lobby = connection.execute(
         """
-        SELECT code, name, password_hash, member_count, point_system
+        SELECT code, name, password_hash, member_count, point_system, custom_settings_json
         FROM lobbies
         WHERE code = ?
         """,
@@ -425,6 +458,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
         requires_password=lobby["password_hash"] is not None,
         member_count=int(lobby["member_count"]),
         point_system=str(lobby["point_system"]) if lobby["point_system"] else None,
+        custom_settings=json.loads(str(lobby["custom_settings_json"])) if lobby["custom_settings_json"] else None,
         members=[
             LobbyMemberRecord(
                 user_id=int(row["user_id"]),
