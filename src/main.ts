@@ -49,6 +49,7 @@ type Page =
   | "bracket"
   | "lobby"
   | "my-lobbies"
+  | "predictions"
   | "point-system"
   | "custom-settings";
 
@@ -131,6 +132,14 @@ type Lobby = {
   members: LobbyMember[];
 };
 
+type MatchPrediction = {
+  matchId: number;
+  homeScore: number | null;
+  awayScore: number | null;
+};
+
+type PredictionSaveState = "idle" | "saving" | "saved" | "error";
+
 type CreateLobbyModalState = {
   isOpen: boolean;
   name: string;
@@ -181,6 +190,15 @@ type DeleteLobbyModalState = {
   isSubmitting: boolean;
 };
 
+type PredictionCopyScope = "all" | "phase";
+
+type PredictionCopyModalState = {
+  isOpen: boolean;
+  scope: PredictionCopyScope | null;
+  message: string | null;
+  isSubmitting: boolean;
+};
+
 type Copy = {
   brandAria: string;
   navAria: string;
@@ -191,6 +209,7 @@ type Copy = {
     bracket: string;
     matches: string;
     myLobbies: string;
+    predictions: string;
   };
   signIn: string;
   signOut: string;
@@ -254,6 +273,7 @@ type Copy = {
     kickMember: string;
     deleteLobby: string;
     showRules: string;
+    myPredictions: string;
     closeRules: string;
     rulesTitle: string;
     pointSystem: string;
@@ -296,6 +316,35 @@ type Copy = {
     openLobby: string;
     groupCode: string;
     members: string;
+  };
+  predictionsPage: {
+    title: string;
+    aria: string;
+    eyebrow: string;
+    summary: string;
+    loading: string;
+    error: string;
+    emptyLobbies: string;
+    emptyMatches: string;
+    lobbyLabel: string;
+    phaseLabel: string;
+    defaultLobby: string;
+    copyAll: string;
+    copyPhase: string;
+    copyAllConfirm: string;
+    copyPhaseConfirm: string;
+    confirmTitle: string;
+    confirmBody: string;
+    confirmAction: string;
+    cancelAction: string;
+    copySuccess: string;
+    allMatches: string;
+    saveIdle: string;
+    saveSaving: string;
+    saveSaved: string;
+    saveError: string;
+    homeScore: string;
+    awayScore: string;
   };
   pointSystemPage: {
     title: string;
@@ -374,6 +423,7 @@ const authApiUrl = "http://127.0.0.1:8001";
 const matchesApiUrl = "http://127.0.0.1:8002";
 const lobbiesApiUrl = "http://127.0.0.1:8003";
 const lobbyCreationDraftStorageKey = "worldcup-lobby-creation-draft";
+const defaultPredictionLobbyCode = "__default__";
 const defaultCustomSettingValues: Record<CustomNumericFieldId, string> = {
   exactScore: "5",
   resultGoalDifference: "4",
@@ -427,15 +477,23 @@ let carouselMatches: CarouselMatch[] = [];
 let allMatches: CarouselMatch[] = [];
 let currentLobby: Lobby | null = null;
 let userLobbies: Lobby[] = [];
+let matchPredictions: Record<number, MatchPrediction> = {};
+let predictionSaveStates: Record<number, PredictionSaveState> = {};
+let selectedPredictionLobbyCode = defaultPredictionLobbyCode;
+let selectedPredictionPhase = "";
+let openPredictionDropdown: "lobby" | "phase" | null = null;
 let activeMatchIndex = 0;
+let isCurrentUserLoading = true;
 let isMatchesLoading = true;
 let isAllMatchesLoading = false;
 let isLobbyLoading = false;
 let isUserLobbiesLoading = false;
+let isPredictionsLoading = false;
 let matchesError: string | null = null;
 let allMatchesError: string | null = null;
 let lobbyError: string | null = null;
 let userLobbiesError: string | null = null;
+let predictionsError: string | null = null;
 let areLobbyRulesVisible = false;
 let selectedPointSystem: PointSystemId | null = null;
 let selectedPointSystemLobbyCode: string | null = null;
@@ -484,6 +542,12 @@ let deleteLobbyModal: DeleteLobbyModalState = {
   isOpen: false,
   lobby: null,
   confirmationText: "",
+  message: null,
+  isSubmitting: false
+};
+let predictionCopyModal: PredictionCopyModalState = {
+  isOpen: false,
+  scope: null,
   message: null,
   isSubmitting: false
 };
@@ -690,7 +754,8 @@ const copy: Record<Language, Copy> = {
       groups: "Standings",
       bracket: "Bracket",
       matches: "Matches",
-      myLobbies: "My lobbies"
+      myLobbies: "My lobbies",
+      predictions: "Predictions"
     },
     signIn: "Sign in",
     signOut: "Sign out",
@@ -768,6 +833,7 @@ const copy: Record<Language, Copy> = {
       kickMember: "Kick",
       deleteLobby: "Delete lobby",
       showRules: "View rules",
+      myPredictions: "My predictions",
       closeRules: "Close rules",
       rulesTitle: "Lobby rules",
       pointSystem: "Point system",
@@ -810,6 +876,35 @@ const copy: Record<Language, Copy> = {
       openLobby: "Open lobby",
       groupCode: "Group code",
       members: "Members"
+    },
+    predictionsPage: {
+      title: "Default predictions",
+      aria: "Default match predictions",
+      eyebrow: "Prediction board",
+      summary: "Pick a lobby and a group or phase, then enter your score predictions. Changes save automatically.",
+      loading: "Loading predictions...",
+      error: "Predictions are not available right now.",
+      emptyLobbies: "Join or create a lobby before making predictions.",
+      emptyMatches: "No matches found for this selection.",
+      lobbyLabel: "Lobby",
+      phaseLabel: "Group or phase",
+      defaultLobby: "Default",
+      copyAll: "Apply default to lobby",
+      copyPhase: "Apply default to selected group/phase",
+      copyAllConfirm: "Apply all default predictions to this lobby?",
+      copyPhaseConfirm: "Apply default predictions for the selected group/phase to this lobby?",
+      confirmTitle: "Apply default predictions",
+      confirmBody: "This will replace matching saved predictions in the selected lobby.",
+      confirmAction: "Apply predictions",
+      cancelAction: "Cancel",
+      copySuccess: "Default predictions were applied.",
+      allMatches: "All matches",
+      saveIdle: "Not saved",
+      saveSaving: "Saving...",
+      saveSaved: "Saved",
+      saveError: "Could not save",
+      homeScore: "Home score",
+      awayScore: "Away score"
     },
     pointSystemPage: {
       title: "Choose a point system",
@@ -986,7 +1081,8 @@ const copy: Record<Language, Copy> = {
       groups: "Posiciones",
       bracket: "Llaves",
       matches: "Partidos",
-      myLobbies: "Mis lobbies"
+      myLobbies: "Mis lobbies",
+      predictions: "Pronósticos"
     },
     signIn: "Iniciar sesión",
     signOut: "Cerrar sesión",
@@ -1064,6 +1160,7 @@ const copy: Record<Language, Copy> = {
       kickMember: "Expulsar",
       deleteLobby: "Eliminar lobby",
       showRules: "Ver reglas",
+      myPredictions: "Mis pronósticos",
       closeRules: "Cerrar reglas",
       rulesTitle: "Reglas del lobby",
       pointSystem: "Sistema de puntos",
@@ -1106,6 +1203,35 @@ const copy: Record<Language, Copy> = {
       openLobby: "Abrir lobby",
       groupCode: "Código del grupo",
       members: "Miembros"
+    },
+    predictionsPage: {
+      title: "Pronósticos por defecto",
+      aria: "Pronósticos por defecto de partidos",
+      eyebrow: "Tablero de pronósticos",
+      summary: "Elige un lobby y un grupo o fase, luego ingresa tus marcadores. Los cambios se guardan automáticamente.",
+      loading: "Cargando pronósticos...",
+      error: "Los pronósticos no están disponibles en este momento.",
+      emptyLobbies: "Únete o crea un lobby antes de hacer pronósticos.",
+      emptyMatches: "No se encontraron partidos para esta selección.",
+      lobbyLabel: "Lobby",
+      phaseLabel: "Grupo o fase",
+      defaultLobby: "Por defecto",
+      copyAll: "Aplicar por defecto al lobby",
+      copyPhase: "Aplicar por defecto al grupo/fase",
+      copyAllConfirm: "¿Aplicar todos los pronósticos por defecto a este lobby?",
+      copyPhaseConfirm: "¿Aplicar los pronósticos por defecto del grupo/fase seleccionado a este lobby?",
+      confirmTitle: "Aplicar pronósticos por defecto",
+      confirmBody: "Esto reemplazará los pronósticos guardados que coincidan en el lobby seleccionado.",
+      confirmAction: "Aplicar pronósticos",
+      cancelAction: "Cancelar",
+      copySuccess: "Los pronósticos por defecto fueron aplicados.",
+      allMatches: "Todos los partidos",
+      saveIdle: "Sin guardar",
+      saveSaving: "Guardando...",
+      saveSaved: "Guardado",
+      saveError: "No se pudo guardar",
+      homeScore: "Goles local",
+      awayScore: "Goles visitante"
     },
     pointSystemPage: {
       title: "Elige un sistema de puntos",
@@ -1321,6 +1447,10 @@ const getCurrentPage = (): Page => {
     return "my-lobbies";
   }
 
+  if (document.body.dataset.page === "predictions" || window.location.pathname.endsWith("/predictions.html")) {
+    return "predictions";
+  }
+
   return "home";
 };
 
@@ -1331,6 +1461,8 @@ const getLobbyCodeFromUrl = () => {
 };
 
 const getLobbyDraftIdFromUrl = () => new URLSearchParams(window.location.search).get("draft")?.trim() ?? "";
+
+const getPredictionLobbyFromUrl = () => new URLSearchParams(window.location.search).get("lobby")?.trim().toUpperCase() ?? "";
 
 const createLobbyDraftId = () => {
   if ("crypto" in window && typeof window.crypto.randomUUID === "function") {
@@ -1525,42 +1657,13 @@ const getMatchStatusLabel = (status: string, selectedCopy: Copy) => {
   return selectedCopy.match.scheduled;
 };
 
-const localizeMatchLabel = (label: string | null, language: Language) => {
-  if (!label) {
-    return "";
-  }
-
-  if (language === "en") {
-    return label;
-  }
-
-  if (label.startsWith("Group ")) {
-    return label.replace("Group", "Grupo");
-  }
-
-  if (label === "Group Stage") {
-    return "Fase de grupos";
-  }
-
-  return label;
-};
-
-const knockoutStageOrder = [
-  "Last 32",
-  "Last 16",
-  "Quarter Finals",
-  "Semi Finals",
-  "Third Place",
-  "Final"
-];
-
 const stageDisplayLabels: Record<string, string> = {
   "Last 16": "Round of 16"
 };
 
 const stageTranslations: Partial<Record<Language, Record<string, string>>> = {
   es: {
-    "Last 32": "Ronda de 32",
+    "Last 32": "Dieciseisavos de final",
     "Last 16": "Octavos de final",
     "Quarter Finals": "Cuartos de final",
     "Semi Finals": "Semifinales",
@@ -1571,6 +1674,31 @@ const stageTranslations: Partial<Record<Language, Record<string, string>>> = {
 
 const localizeStageLabel = (stage: string, language: Language) =>
   stageTranslations[language]?.[stage] ?? stageDisplayLabels[stage] ?? stage;
+
+const localizeMatchLabel = (label: string | null, language: Language) => {
+  if (!label) {
+    return "";
+  }
+
+  if (language === "es" && label.startsWith("Group ")) {
+    return label.replace("Group", "Grupo");
+  }
+
+  if (language === "es" && label === "Group Stage") {
+    return "Fase de grupos";
+  }
+
+  return localizeStageLabel(label, language);
+};
+
+const knockoutStageOrder = [
+  "Last 32",
+  "Last 16",
+  "Quarter Finals",
+  "Semi Finals",
+  "Third Place",
+  "Final"
+];
 
 const getKnockoutMatches = () =>
   allMatches
@@ -1918,6 +2046,211 @@ const renderMatchesPage = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const getPredictionPhaseSortValue = (phase: string) => {
+  const groupMatch = /^Group ([A-Z])$/.exec(phase);
+
+  if (groupMatch) {
+    const groupIndex = worldCupGroups.findIndex((group) => group.letter === groupMatch[1]);
+
+    if (groupIndex !== -1) {
+      return groupIndex;
+    }
+  }
+
+  const knockoutIndex = knockoutStageOrder.indexOf(phase);
+
+  if (knockoutIndex !== -1) {
+    return worldCupGroups.length + knockoutIndex;
+  }
+
+  if (phase === "Group Stage") {
+    return worldCupGroups.length + knockoutStageOrder.length;
+  }
+
+  return Number.MAX_SAFE_INTEGER;
+};
+
+const getPredictionPhaseOptions = (language: Language) => {
+  const options = new Map<string, string>();
+
+  allMatches.forEach((match) => {
+    const key = match.group ?? match.stage;
+
+    if (key) {
+      options.set(key, localizeMatchLabel(key, language));
+    }
+  });
+
+  return Array.from(options.entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => {
+      const orderDifference = getPredictionPhaseSortValue(a.value) - getPredictionPhaseSortValue(b.value);
+
+      if (orderDifference !== 0) {
+        return orderDifference;
+      }
+
+      return a.label.localeCompare(b.label, language);
+    });
+};
+
+const getFilteredPredictionMatches = () => {
+  if (!selectedPredictionPhase) {
+    return allMatches;
+  }
+
+  return allMatches.filter((match) => (match.group ?? match.stage) === selectedPredictionPhase);
+};
+
+const getPredictionValue = (matchId: number, side: "home" | "away") => {
+  const prediction = matchPredictions[matchId];
+  const value = side === "home" ? prediction?.homeScore : prediction?.awayScore;
+
+  return value === null || value === undefined ? "" : String(value);
+};
+
+const getPredictionSaveLabel = (selectedCopy: Copy, matchId: number) => {
+  const state = predictionSaveStates[matchId] ?? "idle";
+
+  return {
+    error: selectedCopy.predictionsPage.saveError,
+    idle: selectedCopy.predictionsPage.saveIdle,
+    saved: selectedCopy.predictionsPage.saveSaved,
+    saving: selectedCopy.predictionsPage.saveSaving
+  }[state];
+};
+
+const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, language: Language) => {
+  const saveState = predictionSaveStates[match.id] ?? "idle";
+
+  return `
+    <article class="prediction-match-card">
+      <div class="match-list-meta">
+        <span>${getMatchTime(match.utcDate, language)}</span>
+        <strong>${localizeMatchLabel(match.group ?? match.stage, language)}</strong>
+      </div>
+      <div class="prediction-teams">
+        <label class="prediction-team-row">
+          ${renderTeamBadge(match.homeTeam, language)}
+          <span>${getTeamDisplayName(match.homeTeam, language)}</span>
+          <input
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            aria-label="${getTeamDisplayName(match.homeTeam, language)} ${selectedCopy.predictionsPage.homeScore}"
+            data-prediction-match="${match.id}"
+            data-prediction-side="home"
+            value="${getPredictionValue(match.id, "home")}"
+          />
+        </label>
+        <label class="prediction-team-row">
+          ${renderTeamBadge(match.awayTeam, language)}
+          <span>${getTeamDisplayName(match.awayTeam, language)}</span>
+          <input
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            aria-label="${getTeamDisplayName(match.awayTeam, language)} ${selectedCopy.predictionsPage.awayScore}"
+            data-prediction-match="${match.id}"
+            data-prediction-side="away"
+            value="${getPredictionValue(match.id, "away")}"
+          />
+        </label>
+      </div>
+      <p class="prediction-save-state is-${saveState}" data-prediction-save-state="${match.id}">${getPredictionSaveLabel(selectedCopy, match.id)}</p>
+    </article>
+  `;
+};
+
+const renderPredictionsPage = (selectedCopy: Copy, language: Language) => {
+  const phaseOptions = getPredictionPhaseOptions(language);
+  const filteredMatches = getFilteredPredictionMatches();
+  const selectedLobby = userLobbies.find((lobby) => lobby.code === selectedPredictionLobbyCode) ?? null;
+  const isDefaultSelected = selectedPredictionLobbyCode === defaultPredictionLobbyCode;
+  const selectedLobbyLabel = selectedLobby
+    ? `${selectedLobby.name} (${selectedLobby.code})`
+    : selectedCopy.predictionsPage.defaultLobby;
+  const selectedPhaseLabel =
+    phaseOptions.find((option) => option.value === selectedPredictionPhase)?.label ?? selectedCopy.predictionsPage.allMatches;
+
+  return `
+    <section class="predictions-section" id="predictions" aria-label="${selectedCopy.predictionsPage.aria}">
+      <div class="section-heading">
+        <p class="eyebrow">${selectedCopy.predictionsPage.eyebrow}</p>
+        <h2>${selectedCopy.predictionsPage.title}</h2>
+        <p>${selectedCopy.predictionsPage.summary}</p>
+      </div>
+      ${
+        isCurrentUserLoading || !currentUser || isUserLobbiesLoading || isAllMatchesLoading || isPredictionsLoading
+          ? `<div class="matches-state">${selectedCopy.predictionsPage.loading}</div>`
+          : userLobbiesError || allMatchesError || predictionsError
+            ? `<div class="matches-state">${selectedCopy.predictionsPage.error}</div>`
+            : `
+                <div class="prediction-controls">
+                  <div class="prediction-dropdown" data-prediction-dropdown="lobby">
+                    <span>${selectedCopy.predictionsPage.lobbyLabel}</span>
+                    <button class="prediction-dropdown-trigger" type="button" id="prediction-lobby-trigger" aria-expanded="${openPredictionDropdown === "lobby" ? "true" : "false"}" aria-haspopup="menu">
+                      ${selectedLobbyLabel}
+                    </button>
+                    <div class="prediction-dropdown-menu" id="prediction-lobby-menu" role="menu" ${openPredictionDropdown === "lobby" ? "" : "hidden"}>
+                      <button type="button" role="menuitem" data-prediction-lobby="${defaultPredictionLobbyCode}" aria-current="${isDefaultSelected ? "true" : "false"}">
+                        ${selectedCopy.predictionsPage.defaultLobby}
+                      </button>
+                      ${userLobbies
+                        .map(
+                          (lobby) => `
+                            <button type="button" role="menuitem" data-prediction-lobby="${lobby.code}" aria-current="${lobby.code === selectedPredictionLobbyCode ? "true" : "false"}">
+                              ${lobby.name} (${lobby.code})
+                            </button>
+                          `
+                        )
+                        .join("")}
+                    </div>
+                  </div>
+                  <div class="prediction-dropdown" data-prediction-dropdown="phase">
+                    <span>${selectedCopy.predictionsPage.phaseLabel}</span>
+                    <button class="prediction-dropdown-trigger" type="button" id="prediction-phase-trigger" aria-expanded="${openPredictionDropdown === "phase" ? "true" : "false"}" aria-haspopup="menu">
+                      ${selectedPhaseLabel}
+                    </button>
+                    <div class="prediction-dropdown-menu" id="prediction-phase-menu" role="menu" ${openPredictionDropdown === "phase" ? "" : "hidden"}>
+                      <button type="button" role="menuitem" data-prediction-phase="" aria-current="${selectedPredictionPhase ? "false" : "true"}">${selectedCopy.predictionsPage.allMatches}</button>
+                      ${phaseOptions
+                        .map(
+                          (option) => `
+                            <button type="button" role="menuitem" data-prediction-phase="${option.value}" aria-current="${option.value === selectedPredictionPhase ? "true" : "false"}">
+                              ${option.label}
+                            </button>
+                          `
+                        )
+                        .join("")}
+                    </div>
+                  </div>
+                  ${
+                    selectedLobby
+                      ? `<div class="prediction-copy-actions">
+                          <button class="secondary-action" type="button" id="copy-default-all">
+                            ${selectedCopy.predictionsPage.copyAll}
+                          </button>
+                          <button class="secondary-action" type="button" id="copy-default-phase" ${selectedPredictionPhase ? "" : "disabled"}>
+                            ${selectedCopy.predictionsPage.copyPhase}
+                          </button>
+                        </div>`
+                      : ""
+                  }
+                </div>
+                ${
+                  filteredMatches.length === 0
+                    ? `<div class="matches-state">${selectedCopy.predictionsPage.emptyMatches}</div>`
+                    : `<div class="prediction-match-grid">
+                        ${filteredMatches.map((match) => renderPredictionMatchCard(match, selectedCopy, language)).join("")}
+                      </div>`
+                }
+              `
+      }
+    </section>
+  `;
+};
+
 const renderBracketTeam = (match: CarouselMatch, side: "home" | "away", language: Language) => {
   const teamName = side === "home" ? match.homeTeam : match.awayTeam;
   const score = side === "home" ? match.score.home : match.score.away;
@@ -2016,75 +2349,97 @@ const renderBracketPage = (selectedCopy: Copy, language: Language) => {
 const renderLobbyPage = (selectedCopy: Copy, language: Language) => {
   const lobbyCode = getLobbyCodeFromUrl();
   const isAdmin = isCurrentUserLobbyAdmin(currentLobby);
+  const isMember = Boolean(
+    currentUser && currentLobby?.members.some((member) => member.userId === currentUser?.id)
+  );
 
   return `
     <section class="lobby-section" id="lobby" aria-label="${selectedCopy.lobbyPage.aria}">
-      <div class="section-heading">
-        <p class="eyebrow">FIFA World Cup 2026</p>
-        <h2>${currentLobby?.name ?? selectedCopy.lobbyPage.title}</h2>
-      </div>
       ${
         !lobbyCode
-          ? `<div class="matches-state">${selectedCopy.lobbyPage.missingCode}</div>`
+          ? `<div class="section-heading">
+              <p class="eyebrow">FIFA World Cup 2026</p>
+              <h2>${selectedCopy.lobbyPage.title}</h2>
+            </div>
+            <div class="matches-state">${selectedCopy.lobbyPage.missingCode}</div>`
           : isLobbyLoading
-            ? `<div class="matches-state">${selectedCopy.lobbyPage.loading}</div>`
+            ? `<div class="section-heading">
+                <p class="eyebrow">FIFA World Cup 2026</p>
+                <h2>${selectedCopy.lobbyPage.title}</h2>
+              </div>
+              <div class="matches-state">${selectedCopy.lobbyPage.loading}</div>`
             : lobbyError
-              ? `<div class="matches-state">${selectedCopy.lobbyPage.error}</div>`
+              ? `<div class="section-heading">
+                  <p class="eyebrow">FIFA World Cup 2026</p>
+                  <h2>${selectedCopy.lobbyPage.title}</h2>
+                </div>
+                <div class="matches-state">${selectedCopy.lobbyPage.error}</div>`
               : currentLobby
                 ? `
-                  <article class="lobby-card">
-                    <div class="lobby-card-header">
-                      <span>${selectedCopy.lobbyPage.members}</span>
-                      <span class="lobby-card-actions">
-                        <span class="lobby-code">
-                          <span>${selectedCopy.lobbyPage.groupCode}</span>
-                          <strong>${currentLobby.code}</strong>
-                        </span>
-                        <button class="secondary-action compact-secondary-action" type="button" id="lobby-rules-toggle">
-                          ${selectedCopy.lobbyPage.showRules}
-                        </button>
+                  <div class="lobby-content-layout">
+                    <div class="lobby-main-column">
+                      <div class="section-heading">
+                        <p class="eyebrow">FIFA World Cup 2026</p>
+                        <h2>${currentLobby.name}</h2>
+                      </div>
+                      <article class="lobby-card">
+                        <div class="lobby-card-header">
+                          <span>${selectedCopy.lobbyPage.members}</span>
+                          <span class="lobby-code">
+                            <span>${selectedCopy.lobbyPage.groupCode}</span>
+                            <strong>${currentLobby.code}</strong>
+                          </span>
+                        </div>
                         ${
-                          currentUser && currentLobby.members.some((member) => member.userId === currentUser?.id)
-                            ? `<button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>`
-                            : ""
+                          currentLobby.members.length === 0
+                            ? `<div class="lobby-empty">${selectedCopy.lobbyPage.empty}</div>`
+                            : `
+                              <ul class="lobby-member-list">
+                                ${currentLobby.members
+                                  .map(
+                                    (member) => `
+                                      <li class="lobby-member">
+                                        <span>${member.username}</span>
+                                        <span class="lobby-member-actions">
+                                          ${
+                                            member.role === "admin"
+                                              ? `<strong>${selectedCopy.lobbyPage.admin}</strong>`
+                                              : ""
+                                          }
+                                          ${
+                                            isAdmin && currentUser?.id !== member.userId && member.role !== "admin"
+                                              ? `<button class="leave-lobby-button is-visible" type="button" data-kick-member-id="${member.userId}" data-kick-member-name="${member.username}">${selectedCopy.lobbyPage.kickMember}</button>`
+                                              : ""
+                                          }
+                                        </span>
+                                      </li>
+                                    `
+                                  )
+                                  .join("")}
+                              </ul>
+                            `
                         }
-                        ${
-                          isAdmin
-                            ? `<button class="danger-action compact-danger-action" type="button" data-delete-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.deleteLobby}</button>`
-                            : ""
-                        }
-                      </span>
+                      </article>
                     </div>
                     ${
-                      currentLobby.members.length === 0
-                        ? `<div class="lobby-empty">${selectedCopy.lobbyPage.empty}</div>`
-                        : `
-                          <ul class="lobby-member-list">
-                            ${currentLobby.members
-                              .map(
-                                (member) => `
-                                  <li class="lobby-member">
-                                    <span>${member.username}</span>
-                                    <span class="lobby-member-actions">
-                                      ${
-                                        member.role === "admin"
-                                          ? `<strong>${selectedCopy.lobbyPage.admin}</strong>`
-                                          : ""
-                                      }
-                                      ${
-                                        isAdmin && currentUser?.id !== member.userId && member.role !== "admin"
-                                          ? `<button class="leave-lobby-button is-visible" type="button" data-kick-member-id="${member.userId}" data-kick-member-name="${member.username}">${selectedCopy.lobbyPage.kickMember}</button>`
-                                          : ""
-                                      }
-                                    </span>
-                                  </li>
-                                `
-                              )
-                              .join("")}
-                          </ul>
-                        `
+                      isMember
+                        ? `<aside class="lobby-action-panel" aria-label="${selectedCopy.lobbyPage.title}">
+                            <button class="secondary-action compact-secondary-action" type="button" id="lobby-rules-toggle">
+                              ${selectedCopy.lobbyPage.showRules}
+                            </button>
+                            <a class="secondary-action compact-secondary-action" href="/predictions.html?lobby=${encodeURIComponent(currentLobby.code)}">
+                              ${selectedCopy.lobbyPage.myPredictions}
+                            </a>
+                            <button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>
+                            ${
+                              isAdmin
+                                ? `<button class="danger-action compact-danger-action" type="button" data-delete-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.deleteLobby}</button>`
+                                : ""
+                            }
+                          </aside>`
+                        : ""
                     }
-                  </article>
+                  </div>
                 `
                 : `<div class="matches-state">${selectedCopy.lobbyPage.empty}</div>`
       }
@@ -2593,6 +2948,41 @@ const renderLobbyRulesModal = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const renderPredictionCopyModal = (selectedCopy: Copy) => {
+  if (!predictionCopyModal.isOpen || !predictionCopyModal.scope) {
+    return "";
+  }
+
+  const confirmation =
+    predictionCopyModal.scope === "all"
+      ? selectedCopy.predictionsPage.copyAllConfirm
+      : selectedCopy.predictionsPage.copyPhaseConfirm;
+
+  return `
+    <div class="modal-backdrop" role="presentation" id="prediction-copy-backdrop">
+      <section class="join-lobby-modal" role="dialog" aria-modal="true" aria-labelledby="prediction-copy-title">
+        <div class="modal-header">
+          <h2 id="prediction-copy-title">${selectedCopy.predictionsPage.confirmTitle}</h2>
+          <button class="modal-close" type="button" id="prediction-copy-close" aria-label="${selectedCopy.predictionsPage.cancelAction}">
+            ×
+          </button>
+        </div>
+        <p class="leave-lobby-body">${confirmation}</p>
+        <p class="leave-lobby-body">${selectedCopy.predictionsPage.confirmBody}</p>
+        ${predictionCopyModal.message ? `<p class="join-lobby-message">${predictionCopyModal.message}</p>` : ""}
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="prediction-copy-cancel">
+            ${selectedCopy.predictionsPage.cancelAction}
+          </button>
+          <button class="primary-action" type="button" id="prediction-copy-confirm" ${predictionCopyModal.isSubmitting ? "disabled" : ""}>
+            ${selectedCopy.predictionsPage.confirmAction}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
 const renderStandings = (selectedCopy: Copy, language: Language) => {
   const standings = getComputedStandings();
 
@@ -2677,6 +3067,7 @@ const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | und
       <a href="/groups.html">${selectedCopy.nav.groups}</a>
       <a href="/bracket.html">${selectedCopy.nav.bracket}</a>
       <a href="/matches.html">${selectedCopy.nav.matches}</a>
+      ${currentUser ? `<a href="/predictions.html">${selectedCopy.nav.predictions}</a>` : ""}
       ${currentUser ? `<a href="/my-lobbies.html">${selectedCopy.nav.myLobbies}</a>` : ""}
     </nav>
     <div class="topbar-actions">
@@ -2847,6 +3238,7 @@ const render = (language: Language) => {
     lobby: renderLobbyPage(selectedCopy, language),
     matches: renderMatchesPage(selectedCopy, language),
     "my-lobbies": renderMyLobbiesPage(selectedCopy),
+    predictions: renderPredictionsPage(selectedCopy, language),
     "point-system": renderPointSystemPage(selectedCopy)
   }[currentPage];
 
@@ -2863,6 +3255,7 @@ const render = (language: Language) => {
   ${renderKickMemberModal(selectedCopy)}
   ${renderDeleteLobbyModal(selectedCopy)}
   ${renderLobbyRulesModal(selectedCopy, language)}
+  ${renderPredictionCopyModal(selectedCopy)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -2904,6 +3297,18 @@ const render = (language: Language) => {
   const deleteLobbyConfirmButton = document.querySelector<HTMLButtonElement>("#delete-lobby-confirm");
   const pointSystemButtons = document.querySelectorAll<HTMLButtonElement>("[data-point-system]");
   const pointSystemContinueButton = document.querySelector<HTMLButtonElement>("#point-system-continue");
+  const predictionDropdownControls = document.querySelectorAll<HTMLDivElement>("[data-prediction-dropdown]");
+  const predictionLobbyTrigger = document.querySelector<HTMLButtonElement>("#prediction-lobby-trigger");
+  const predictionPhaseTrigger = document.querySelector<HTMLButtonElement>("#prediction-phase-trigger");
+  const predictionLobbyButtons = document.querySelectorAll<HTMLButtonElement>("[data-prediction-lobby]");
+  const predictionPhaseButtons = document.querySelectorAll<HTMLButtonElement>("[data-prediction-phase]");
+  const predictionInputs = document.querySelectorAll<HTMLInputElement>("[data-prediction-match]");
+  const copyDefaultAllButton = document.querySelector<HTMLButtonElement>("#copy-default-all");
+  const copyDefaultPhaseButton = document.querySelector<HTMLButtonElement>("#copy-default-phase");
+  const predictionCopyBackdrop = document.querySelector<HTMLDivElement>("#prediction-copy-backdrop");
+  const predictionCopyCloseButton = document.querySelector<HTMLButtonElement>("#prediction-copy-close");
+  const predictionCopyCancelButton = document.querySelector<HTMLButtonElement>("#prediction-copy-cancel");
+  const predictionCopyConfirmButton = document.querySelector<HTMLButtonElement>("#prediction-copy-confirm");
   const customFieldToggles = document.querySelectorAll<HTMLInputElement>("[data-custom-field-toggle]");
   const customFieldInputs = document.querySelectorAll<HTMLInputElement>("[data-custom-field-value]");
   const customFeatureToggles = document.querySelectorAll<HTMLInputElement>("[data-custom-feature-toggle]");
@@ -3050,6 +3455,115 @@ const render = (language: Language) => {
     }
 
     void savePointSystemSelection(selectedCopy);
+  });
+
+  const togglePredictionDropdown = (dropdown: "lobby" | "phase") => {
+    openPredictionDropdown = openPredictionDropdown === dropdown ? null : dropdown;
+    render(getStoredLanguage());
+  };
+
+  predictionLobbyTrigger?.addEventListener("click", () => {
+    togglePredictionDropdown("lobby");
+  });
+
+  predictionPhaseTrigger?.addEventListener("click", () => {
+    togglePredictionDropdown("phase");
+  });
+
+  predictionLobbyButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedPredictionLobbyCode = button.dataset.predictionLobby ?? defaultPredictionLobbyCode;
+      openPredictionDropdown = null;
+      matchPredictions = {};
+      predictionSaveStates = {};
+      void loadMatchPredictions();
+      render(getStoredLanguage());
+    });
+  });
+
+  predictionPhaseButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedPredictionPhase = button.dataset.predictionPhase ?? "";
+      openPredictionDropdown = null;
+      render(getStoredLanguage());
+    });
+  });
+
+  predictionDropdownControls.forEach((control) => {
+    control.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+  });
+
+  if (openPredictionDropdown) {
+    document.addEventListener(
+      "click",
+      () => {
+        openPredictionDropdown = null;
+        render(getStoredLanguage());
+      },
+      { once: true }
+    );
+  }
+
+  copyDefaultAllButton?.addEventListener("click", () => {
+    openPredictionCopyModal("all");
+  });
+
+  copyDefaultPhaseButton?.addEventListener("click", () => {
+    openPredictionCopyModal("phase");
+  });
+
+  const closePredictionCopyModal = () => {
+    predictionCopyModal = {
+      isOpen: false,
+      scope: null,
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  predictionCopyCloseButton?.addEventListener("click", closePredictionCopyModal);
+  predictionCopyCancelButton?.addEventListener("click", closePredictionCopyModal);
+  predictionCopyBackdrop?.addEventListener("click", (event) => {
+    if (event.target === predictionCopyBackdrop) {
+      closePredictionCopyModal();
+    }
+  });
+  predictionCopyConfirmButton?.addEventListener("click", () => {
+    if (predictionCopyModal.scope) {
+      void copyDefaultPredictionsToSelectedLobby(predictionCopyModal.scope, selectedCopy);
+    }
+  });
+
+  predictionInputs.forEach((input) => {
+    input.addEventListener("input", () => {
+      const matchId = Number(input.dataset.predictionMatch);
+      const side = input.dataset.predictionSide === "away" ? "away" : "home";
+
+      if (!Number.isInteger(matchId) || matchId <= 0) {
+        return;
+      }
+
+      const nextValue = sanitizeNonNegativeIntegerInput(input.value);
+      input.value = nextValue;
+      const existingPrediction = matchPredictions[matchId] ?? { matchId, homeScore: null, awayScore: null };
+      const nextScore = nextValue === "" ? null : Number(nextValue);
+      matchPredictions = {
+        ...matchPredictions,
+        [matchId]: {
+          ...existingPrediction,
+          [side === "home" ? "homeScore" : "awayScore"]: nextScore
+        }
+      };
+      predictionSaveStates = {
+        ...predictionSaveStates,
+        [matchId]: "saving"
+      };
+      updatePredictionSaveIndicator(matchId);
+      void saveMatchPrediction(matchId);
+    });
   });
 
   customFieldToggles.forEach((toggle) => {
@@ -3393,14 +3907,31 @@ const loadCurrentUser = async () => {
     });
 
     if (!response.ok) {
+      currentUser = null;
+      isCurrentUserLoading = false;
+      if (getCurrentPage() === "predictions") {
+        window.location.href = authClientUrl;
+      }
+      render(getStoredLanguage());
       return;
     }
 
     const result = (await response.json()) as { user?: CurrentUser };
     currentUser = result.user ?? null;
+    isCurrentUserLoading = false;
+    if (!currentUser && getCurrentPage() === "predictions") {
+      window.location.href = authClientUrl;
+      return;
+    }
     render(getStoredLanguage());
   } catch {
     currentUser = null;
+    isCurrentUserLoading = false;
+    if (getCurrentPage() === "predictions") {
+      window.location.href = authClientUrl;
+      return;
+    }
+    render(getStoredLanguage());
   }
 };
 
@@ -3559,6 +4090,150 @@ const savePointSystemSelection = async (selectedCopy: Copy) => {
     window.location.href = `/lobby.html?code=${encodeURIComponent(lobby.code)}`;
   } catch (error) {
     pointSystemSetupError = error instanceof Error ? error.message : selectedCopy.pointSystemPage.saveError;
+    render(getStoredLanguage());
+  }
+};
+
+const updatePredictionSaveIndicator = (matchId: number) => {
+  const language = getStoredLanguage();
+  const selectedCopy = copy[language];
+  const indicator = document.querySelector<HTMLElement>(`[data-prediction-save-state="${matchId}"]`);
+  const state = predictionSaveStates[matchId] ?? "idle";
+
+  if (!indicator) {
+    return;
+  }
+
+  indicator.className = `prediction-save-state is-${state}`;
+  indicator.textContent = getPredictionSaveLabel(selectedCopy, matchId);
+};
+
+const saveMatchPrediction = async (matchId: number) => {
+  const lobbyCode = selectedPredictionLobbyCode;
+  const prediction = matchPredictions[matchId];
+
+  if (!lobbyCode || !prediction) {
+    return;
+  }
+
+  const url =
+    lobbyCode === defaultPredictionLobbyCode
+      ? `${lobbiesApiUrl}/predictions/default/${encodeURIComponent(String(matchId))}`
+      : `${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/predictions/${encodeURIComponent(String(matchId))}`;
+
+  try {
+    const response = await fetch(url, {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        homeScore: prediction.homeScore,
+        awayScore: prediction.awayScore
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not save prediction.");
+    }
+
+    const result = (await response.json()) as { prediction?: MatchPrediction };
+    const savedPrediction = result.prediction ?? prediction;
+    matchPredictions = {
+      ...matchPredictions,
+      [matchId]: savedPrediction
+    };
+    predictionSaveStates = {
+      ...predictionSaveStates,
+      [matchId]: "saved"
+    };
+  } catch {
+    predictionSaveStates = {
+      ...predictionSaveStates,
+      [matchId]: "error"
+    };
+  }
+
+  updatePredictionSaveIndicator(matchId);
+};
+
+const openPredictionCopyModal = (scope: PredictionCopyScope) => {
+  predictionCopyModal = {
+    isOpen: true,
+    scope,
+    message: null,
+    isSubmitting: false
+  };
+  render(getStoredLanguage());
+};
+
+const copyDefaultPredictionsToSelectedLobby = async (scope: "all" | "phase", selectedCopy: Copy) => {
+  if (!selectedPredictionLobbyCode || selectedPredictionLobbyCode === defaultPredictionLobbyCode) {
+    return;
+  }
+
+  if (scope === "phase" && !selectedPredictionPhase) {
+    return;
+  }
+
+  const matchIds = scope === "phase" ? getFilteredPredictionMatches().map((match) => match.id) : undefined;
+
+  predictionCopyModal = {
+    ...predictionCopyModal,
+    message: null,
+    isSubmitting: true
+  };
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(
+      `${lobbiesApiUrl}/lobbies/${encodeURIComponent(selectedPredictionLobbyCode)}/predictions-copy/${scope}`,
+      {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          matchIds
+        })
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Could not copy predictions.");
+    }
+
+    const result = (await response.json()) as { predictions?: MatchPrediction[] };
+    const predictions = Array.isArray(result.predictions) ? result.predictions : [];
+    matchPredictions = {
+      ...matchPredictions,
+      ...predictions.reduce<Record<number, MatchPrediction>>((items, prediction) => {
+        items[prediction.matchId] = prediction;
+        return items;
+      }, {})
+    };
+    predictionSaveStates = {
+      ...predictionSaveStates,
+      ...predictions.reduce<Record<number, PredictionSaveState>>((items, prediction) => {
+        items[prediction.matchId] = "saved";
+        return items;
+      }, {})
+    };
+    predictionCopyModal = {
+      isOpen: false,
+      scope: null,
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  } catch {
+    predictionCopyModal = {
+      ...predictionCopyModal,
+      message: selectedCopy.predictionsPage.saveError,
+      isSubmitting: false
+    };
     render(getStoredLanguage());
   }
 };
@@ -3933,7 +4608,7 @@ const loadCarouselMatches = async () => {
 const loadAllMatches = async () => {
   const currentPage = getCurrentPage();
 
-  if (currentPage !== "matches" && currentPage !== "groups" && currentPage !== "bracket") {
+  if (currentPage !== "matches" && currentPage !== "groups" && currentPage !== "bracket" && currentPage !== "predictions") {
     return;
   }
 
@@ -3995,7 +4670,9 @@ const loadLobby = async () => {
 };
 
 const loadUserLobbies = async () => {
-  if (getCurrentPage() !== "my-lobbies") {
+  const currentPage = getCurrentPage();
+
+  if (currentPage !== "my-lobbies" && currentPage !== "predictions") {
     return;
   }
 
@@ -4019,6 +4696,10 @@ const loadUserLobbies = async () => {
 
     const result = (await response.json()) as { lobbies?: Lobby[] };
     userLobbies = Array.isArray(result.lobbies) ? result.lobbies : [];
+    if (currentPage === "predictions" && !selectedPredictionLobbyCode) {
+      selectedPredictionLobbyCode = defaultPredictionLobbyCode;
+      void loadMatchPredictions();
+    }
   } catch {
     userLobbies = [];
     userLobbiesError = "unavailable";
@@ -4028,9 +4709,61 @@ const loadUserLobbies = async () => {
   }
 };
 
+const loadMatchPredictions = async () => {
+  if (getCurrentPage() !== "predictions" || !selectedPredictionLobbyCode) {
+    return;
+  }
+
+  isPredictionsLoading = true;
+  predictionsError = null;
+  render(getStoredLanguage());
+
+  try {
+    const url =
+      selectedPredictionLobbyCode === defaultPredictionLobbyCode
+        ? `${lobbiesApiUrl}/predictions/default`
+        : `${lobbiesApiUrl}/lobbies/${encodeURIComponent(selectedPredictionLobbyCode)}/predictions`;
+    const response = await fetch(url, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not load predictions.");
+    }
+
+    const result = (await response.json()) as { predictions?: MatchPrediction[] };
+    const predictions = Array.isArray(result.predictions) ? result.predictions : [];
+    matchPredictions = predictions.reduce<Record<number, MatchPrediction>>((items, prediction) => {
+      items[prediction.matchId] = prediction;
+      return items;
+    }, {});
+    predictionSaveStates = predictions.reduce<Record<number, PredictionSaveState>>((items, prediction) => {
+      items[prediction.matchId] = "saved";
+      return items;
+    }, {});
+  } catch {
+    matchPredictions = {};
+    predictionSaveStates = {};
+    predictionsError = "unavailable";
+  } finally {
+    isPredictionsLoading = false;
+    render(getStoredLanguage());
+  }
+};
+
+if (getCurrentPage() === "predictions") {
+  const predictionLobbyCode = getPredictionLobbyFromUrl();
+
+  if (predictionLobbyCode) {
+    selectedPredictionLobbyCode = predictionLobbyCode;
+    selectedPredictionPhase = "";
+  }
+}
+
 render(getStoredLanguage());
 void loadCurrentUser();
 void loadCarouselMatches();
 void loadAllMatches();
 void loadLobby();
 void loadUserLobbies();
+void loadMatchPredictions();

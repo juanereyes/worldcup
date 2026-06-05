@@ -78,6 +78,13 @@ class LobbyRecord:
     members: list[LobbyMemberRecord]
 
 
+@dataclass(frozen=True)
+class MatchPredictionRecord:
+    match_id: int
+    home_score: int | None
+    away_score: int | None
+
+
 def get_database_path() -> Path:
     configured_path = os.environ.get("LOBBIES_DB_PATH")
     return Path(configured_path) if configured_path else DEFAULT_DB_PATH
@@ -136,6 +143,32 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (lobby_code, user_id),
           FOREIGN KEY (lobby_code) REFERENCES lobbies(code) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS match_predictions (
+          lobby_code TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          match_id INTEGER NOT NULL,
+          home_score INTEGER CHECK (home_score IS NULL OR home_score >= 0),
+          away_score INTEGER CHECK (away_score IS NULL OR away_score >= 0),
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (lobby_code, user_id, match_id),
+          FOREIGN KEY (lobby_code, user_id) REFERENCES lobby_members(lobby_code, user_id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS default_match_predictions (
+          user_id INTEGER NOT NULL,
+          match_id INTEGER NOT NULL,
+          home_score INTEGER CHECK (home_score IS NULL OR home_score >= 0),
+          away_score INTEGER CHECK (away_score IS NULL OR away_score >= 0),
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, match_id)
         )
         """
     )
@@ -507,6 +540,215 @@ def list_user_lobbies(connection: sqlite3.Connection, user_id: int) -> list[Lobb
     ).fetchall()
 
     return [get_lobby(connection, str(row["code"])) for row in rows]
+
+
+def list_match_predictions(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    user_id: int,
+) -> list[MatchPredictionRecord]:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_member(connection, normalized_code, user_id):
+        raise LobbyPermissionError("Only lobby members can view predictions.")
+
+    rows = connection.execute(
+        """
+        SELECT match_id, home_score, away_score
+        FROM match_predictions
+        WHERE lobby_code = ? AND user_id = ?
+        ORDER BY match_id ASC
+        """,
+        (normalized_code, user_id),
+    ).fetchall()
+
+    return [
+        MatchPredictionRecord(
+            match_id=int(row["match_id"]),
+            home_score=int(row["home_score"]) if row["home_score"] is not None else None,
+            away_score=int(row["away_score"]) if row["away_score"] is not None else None,
+        )
+        for row in rows
+    ]
+
+
+def list_default_match_predictions(connection: sqlite3.Connection, *, user_id: int) -> list[MatchPredictionRecord]:
+    rows = connection.execute(
+        """
+        SELECT match_id, home_score, away_score
+        FROM default_match_predictions
+        WHERE user_id = ?
+        ORDER BY match_id ASC
+        """,
+        (user_id,),
+    ).fetchall()
+
+    return [
+        MatchPredictionRecord(
+            match_id=int(row["match_id"]),
+            home_score=int(row["home_score"]) if row["home_score"] is not None else None,
+            away_score=int(row["away_score"]) if row["away_score"] is not None else None,
+        )
+        for row in rows
+    ]
+
+
+def save_match_prediction(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    user_id: int,
+    match_id: int,
+    home_score: int | None,
+    away_score: int | None,
+) -> MatchPredictionRecord:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if match_id <= 0:
+        raise ValueError("Match id must be positive.")
+
+    if home_score is not None and home_score < 0:
+        raise ValueError("Home score must be non-negative.")
+
+    if away_score is not None and away_score < 0:
+        raise ValueError("Away score must be non-negative.")
+
+    if not _is_lobby_member(connection, normalized_code, user_id):
+        raise LobbyPermissionError("Only lobby members can save predictions.")
+
+    connection.execute(
+        """
+        INSERT INTO match_predictions (lobby_code, user_id, match_id, home_score, away_score, updated_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(lobby_code, user_id, match_id)
+        DO UPDATE SET
+          home_score = excluded.home_score,
+          away_score = excluded.away_score,
+          updated_at = CURRENT_TIMESTAMP
+        """,
+        (normalized_code, user_id, match_id, home_score, away_score),
+    )
+    connection.commit()
+
+    return MatchPredictionRecord(match_id=match_id, home_score=home_score, away_score=away_score)
+
+
+def save_default_match_prediction(
+    connection: sqlite3.Connection,
+    *,
+    user_id: int,
+    match_id: int,
+    home_score: int | None,
+    away_score: int | None,
+) -> MatchPredictionRecord:
+    if match_id <= 0:
+        raise ValueError("Match id must be positive.")
+
+    if home_score is not None and home_score < 0:
+        raise ValueError("Home score must be non-negative.")
+
+    if away_score is not None and away_score < 0:
+        raise ValueError("Away score must be non-negative.")
+
+    connection.execute(
+        """
+        INSERT INTO default_match_predictions (user_id, match_id, home_score, away_score, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, match_id)
+        DO UPDATE SET
+          home_score = excluded.home_score,
+          away_score = excluded.away_score,
+          updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, match_id, home_score, away_score),
+    )
+    connection.commit()
+
+    return MatchPredictionRecord(match_id=match_id, home_score=home_score, away_score=away_score)
+
+
+def copy_default_predictions_to_lobby(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    user_id: int,
+    match_ids: list[int] | None = None,
+) -> list[MatchPredictionRecord]:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_member(connection, normalized_code, user_id):
+        raise LobbyPermissionError("Only lobby members can save predictions.")
+
+    if match_ids is not None:
+        clean_match_ids = [match_id for match_id in match_ids if match_id > 0]
+
+        if not clean_match_ids:
+            return []
+
+        placeholders = ",".join("?" for _ in clean_match_ids)
+        rows = connection.execute(
+            f"""
+            SELECT match_id, home_score, away_score
+            FROM default_match_predictions
+            WHERE user_id = ? AND match_id IN ({placeholders})
+            ORDER BY match_id ASC
+            """,
+            (user_id, *clean_match_ids),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
+            SELECT match_id, home_score, away_score
+            FROM default_match_predictions
+            WHERE user_id = ?
+            ORDER BY match_id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    predictions = [
+        MatchPredictionRecord(
+            match_id=int(row["match_id"]),
+            home_score=int(row["home_score"]) if row["home_score"] is not None else None,
+            away_score=int(row["away_score"]) if row["away_score"] is not None else None,
+        )
+        for row in rows
+    ]
+
+    for prediction in predictions:
+        connection.execute(
+            """
+            INSERT INTO match_predictions (lobby_code, user_id, match_id, home_score, away_score, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(lobby_code, user_id, match_id)
+            DO UPDATE SET
+              home_score = excluded.home_score,
+              away_score = excluded.away_score,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (normalized_code, user_id, prediction.match_id, prediction.home_score, prediction.away_score),
+        )
+
+    connection.commit()
+
+    return predictions
+
+
+def _is_lobby_member(connection: sqlite3.Connection, code: str, user_id: int) -> bool:
+    row = connection.execute(
+        """
+        SELECT user_id
+        FROM lobby_members
+        WHERE lobby_code = ? AND user_id = ?
+        """,
+        (code, user_id),
+    ).fetchone()
+
+    return row is not None
 
 
 def _is_lobby_admin(connection: sqlite3.Connection, code: str, user_id: int) -> bool:

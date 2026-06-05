@@ -21,13 +21,18 @@ from lobby_service.database import (
     LobbyPasswordRequiredError,
     add_lobby_member,
     connect,
+    copy_default_predictions_to_lobby,
     create_lobby,
     delete_lobby,
     get_lobby,
     initialize_database,
+    list_default_match_predictions,
     list_user_lobbies,
+    list_match_predictions,
     remove_lobby_member,
     remove_lobby_member_by_admin,
+    save_default_match_prediction,
+    save_match_prediction,
     set_lobby_custom_settings,
     set_lobby_point_system,
 )
@@ -263,6 +268,113 @@ class LobbyServiceTest(unittest.TestCase):
 
         self.assertEqual({lobby.code for lobby in lobbies}, {first.code, second.code})
         self.assertEqual(list_user_lobbies(self.connection, 99), [])
+
+    def test_save_match_prediction_upserts_member_prediction(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+
+        first = save_match_prediction(
+            self.connection,
+            code=lobby.code,
+            user_id=1,
+            match_id=1001,
+            home_score=2,
+            away_score=1,
+        )
+        second = save_match_prediction(
+            self.connection,
+            code=lobby.code,
+            user_id=1,
+            match_id=1001,
+            home_score=3,
+            away_score=None,
+        )
+        predictions = list_match_predictions(self.connection, code=lobby.code, user_id=1)
+
+        self.assertEqual(first.home_score, 2)
+        self.assertEqual(second.home_score, 3)
+        self.assertIsNone(second.away_score)
+        self.assertEqual(len(predictions), 1)
+        self.assertEqual(predictions[0].match_id, 1001)
+        self.assertEqual(predictions[0].home_score, 3)
+        self.assertIsNone(predictions[0].away_score)
+
+    def test_save_match_prediction_rejects_non_member(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+
+        with self.assertRaises(LobbyPermissionError):
+            save_match_prediction(
+                self.connection,
+                code=lobby.code,
+                user_id=99,
+                match_id=1001,
+                home_score=2,
+                away_score=1,
+            )
+
+    def test_default_match_prediction_upserts_without_lobby(self) -> None:
+        save_default_match_prediction(
+            self.connection,
+            user_id=1,
+            match_id=1001,
+            home_score=2,
+            away_score=1,
+        )
+        save_default_match_prediction(
+            self.connection,
+            user_id=1,
+            match_id=1001,
+            home_score=None,
+            away_score=3,
+        )
+        predictions = list_default_match_predictions(self.connection, user_id=1)
+
+        self.assertEqual(len(predictions), 1)
+        self.assertEqual(predictions[0].match_id, 1001)
+        self.assertIsNone(predictions[0].home_score)
+        self.assertEqual(predictions[0].away_score, 3)
+
+    def test_copy_default_predictions_to_lobby_can_limit_by_match_ids(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        save_default_match_prediction(
+            self.connection,
+            user_id=1,
+            match_id=1001,
+            home_score=2,
+            away_score=1,
+        )
+        save_default_match_prediction(
+            self.connection,
+            user_id=1,
+            match_id=1002,
+            home_score=0,
+            away_score=0,
+        )
+
+        copied = copy_default_predictions_to_lobby(
+            self.connection,
+            code=lobby.code,
+            user_id=1,
+            match_ids=[1002],
+        )
+        lobby_predictions = list_match_predictions(self.connection, code=lobby.code, user_id=1)
+
+        self.assertEqual([prediction.match_id for prediction in copied], [1002])
+        self.assertEqual(len(lobby_predictions), 1)
+        self.assertEqual(lobby_predictions[0].match_id, 1002)
+        self.assertEqual(lobby_predictions[0].home_score, 0)
+        self.assertEqual(lobby_predictions[0].away_score, 0)
 
     def test_remove_lobby_member_deletes_empty_lobby(self) -> None:
         lobby = create_lobby(

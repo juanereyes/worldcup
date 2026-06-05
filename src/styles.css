@@ -510,6 +510,10 @@ body[data-page="matches"] .matches-section {
   margin-top: 58px;
 }
 
+body[data-page="predictions"] .predictions-section {
+  margin-top: 58px;
+}
+
 body[data-page="bracket"] .bracket-section {
   margin-top: 58px;
 }
@@ -633,6 +637,11 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   max-width: 1120px;
 }
 
+.predictions-section {
+  margin: 72px auto 0;
+  max-width: 1120px;
+}
+
 .bracket-section {
   margin: 72px auto 0;
   max-width: 1280px;
@@ -640,7 +649,7 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 
 .lobby-section {
   margin: 72px auto 0;
-  max-width: 720px;
+  max-width: 1120px;
 }
 
 .my-lobbies-section {
@@ -696,6 +705,170 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.predictions-section {
+  display: grid;
+  gap: 24px;
+}
+
+.prediction-controls {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: flex-start;
+}
+
+.prediction-dropdown {
+  color: var(--green-dark);
+  display: grid;
+  font-weight: 800;
+  gap: 8px;
+  min-width: min(100%, 240px);
+  position: relative;
+}
+
+.prediction-controls span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.prediction-dropdown-trigger {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--green-dark);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  min-height: 42px;
+  padding: 0 12px;
+  text-align: left;
+}
+
+.prediction-dropdown-menu {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(24, 42, 34, 0.12);
+  display: grid;
+  left: 0;
+  max-height: 280px;
+  min-width: 100%;
+  overflow: auto;
+  padding: 6px;
+  position: absolute;
+  right: auto;
+  top: calc(100% + 6px);
+  z-index: 20;
+}
+
+.prediction-dropdown-menu[hidden] {
+  display: none;
+}
+
+.prediction-dropdown-menu button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--green-dark);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.prediction-dropdown-menu button:hover,
+.prediction-dropdown-menu button:focus-visible,
+.prediction-dropdown-menu button[aria-current="true"] {
+  background: #f1f5ee;
+  outline: none;
+}
+
+.prediction-copy-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.prediction-copy-actions .secondary-action {
+  min-height: 42px;
+  padding: 0 14px;
+}
+
+.prediction-match-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.prediction-match-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(24, 42, 34, 0.08);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.prediction-teams {
+  display: grid;
+  gap: 10px;
+}
+
+.prediction-team-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 32px minmax(0, 1fr) 64px;
+}
+
+.prediction-team-row span {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.prediction-team-row input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--green-dark);
+  font: inherit;
+  font-weight: 900;
+  height: 42px;
+  text-align: center;
+  width: 64px;
+}
+
+.prediction-team-row input:focus,
+.prediction-dropdown-trigger:focus-visible {
+  border-color: #98b0a1;
+  box-shadow: 0 0 0 3px rgba(15, 107, 79, 0.12);
+  outline: none;
+}
+
+.prediction-save-state {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin: 0;
+}
+
+.prediction-save-state.is-saved {
+  color: var(--green);
+}
+
+.prediction-save-state.is-saving {
+  color: var(--blue);
+}
+
+.prediction-save-state.is-error {
+  color: var(--red);
 }
 
 .match-list-card {
@@ -894,6 +1067,18 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   overflow: hidden;
 }
 
+.lobby-content-layout {
+  align-items: start;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(0, 720px) 190px;
+  justify-content: space-between;
+}
+
+.lobby-main-column {
+  min-width: 0;
+}
+
 .lobby-card-header,
 .lobby-member {
   align-items: center;
@@ -933,6 +1118,26 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   color: var(--green-dark);
   letter-spacing: 0.08em;
   padding: 6px 9px;
+}
+
+.lobby-action-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(24, 42, 34, 0.12);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  width: 190px;
+}
+
+.lobby-action-panel .secondary-action,
+.lobby-action-panel .leave-lobby-button,
+.lobby-action-panel .danger-action {
+  justify-content: center;
+  min-height: 40px;
+  text-align: center;
+  width: 100%;
 }
 
 .lobby-member-list {
@@ -1670,11 +1875,30 @@ body[data-page="my-lobbies"] .my-lobbies-section {
     grid-template-columns: 1fr;
   }
 
+  .prediction-controls,
+  .prediction-dropdown,
+  .prediction-copy-actions,
+  .prediction-copy-actions .secondary-action {
+    width: 100%;
+  }
+
+  .prediction-match-grid {
+    grid-template-columns: 1fr;
+  }
+
   .my-lobby-card,
   .my-lobby-link,
   .lobby-card-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .lobby-content-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .lobby-action-panel {
+    width: auto;
   }
 
   .lobby-rules-grid {
