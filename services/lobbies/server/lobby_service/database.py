@@ -163,14 +163,23 @@ def create_lobby(
     created_by_username: str,
     name: str = "World Cup Lobby",
     password: str | None = None,
+    point_system: str | None = None,
+    custom_settings: dict[str, Any] | None = None,
     max_attempts: int = 100,
 ) -> LobbyRecord:
     lobby_name = name.strip() or "World Cup Lobby"
     username = created_by_username.strip()
     password_hash = None
+    normalized_point_system = point_system.strip().lower() if point_system else None
 
     if not username:
         raise ValueError("Username is required.")
+
+    if normalized_point_system is not None and normalized_point_system not in POINT_SYSTEMS:
+        raise InvalidPointSystemError("Point system is not supported.")
+
+    if custom_settings is not None and normalized_point_system != "custom":
+        raise InvalidPointSystemError("Custom settings require the custom point system.")
 
     if password is not None:
         errors = password_errors(password)
@@ -186,10 +195,25 @@ def create_lobby(
         try:
             connection.execute(
                 """
-                INSERT INTO lobbies (code, name, created_by_user_id, password_hash, member_count)
-                VALUES (?, ?, ?, ?, 1)
+                INSERT INTO lobbies (
+                  code,
+                  name,
+                  created_by_user_id,
+                  password_hash,
+                  member_count,
+                  point_system,
+                  custom_settings_json
+                )
+                VALUES (?, ?, ?, ?, 1, ?, ?)
                 """,
-                (code, lobby_name, created_by_user_id, password_hash),
+                (
+                    code,
+                    lobby_name,
+                    created_by_user_id,
+                    password_hash,
+                    normalized_point_system,
+                    json.dumps(custom_settings, sort_keys=True) if custom_settings is not None else None,
+                ),
             )
             connection.execute(
                 """

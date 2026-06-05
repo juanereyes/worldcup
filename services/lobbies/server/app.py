@@ -152,6 +152,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         name = str(payload.get("name", "World Cup Lobby"))
         raw_password = payload.get("password")
         password = raw_password if isinstance(raw_password, str) else None
+        raw_point_system = payload.get("pointSystem")
+        point_system = raw_point_system if isinstance(raw_point_system, str) and raw_point_system else None
+        raw_custom_settings = payload.get("customSettings")
+        custom_settings = raw_custom_settings if isinstance(raw_custom_settings, dict) else None
 
         if created_by_user_id <= 0 or not created_by_username.strip():
             self.send_json(400, {"error": "Creator user id and username are required."})
@@ -167,6 +171,8 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     created_by_username=created_by_username,
                     name=name,
                     password=password,
+                    point_system=point_system,
+                    custom_settings=custom_settings,
                 )
             except InvalidLobbyPasswordError as error:
                 self.send_json(
@@ -177,6 +183,9 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                         "requirements": error.errors,
                     },
                 )
+                return
+            except InvalidPointSystemError as error:
+                self.send_json(400, {"code": "invalid_point_system", "error": str(error)})
                 return
             except ValueError as error:
                 self.send_json(400, {"error": str(error)})

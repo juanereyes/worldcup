@@ -140,6 +140,14 @@ type CreateLobbyModalState = {
   isSubmitting: boolean;
 };
 
+type LobbyCreationDraft = {
+  id: string;
+  createdByUserId: number;
+  createdByUsername: string;
+  name: string;
+  password?: string;
+};
+
 type JoinLobbyModalState = {
   isOpen: boolean;
   code: string;
@@ -358,6 +366,7 @@ const authClientUrl = "http://127.0.0.1:5174/";
 const authApiUrl = "http://127.0.0.1:8001";
 const matchesApiUrl = "http://127.0.0.1:8002";
 const lobbiesApiUrl = "http://127.0.0.1:8003";
+const lobbyCreationDraftStorageKey = "worldcup-lobby-creation-draft";
 const defaultCustomSettingValues: Record<CustomNumericFieldId, string> = {
   exactScore: "5",
   resultGoalDifference: "4",
@@ -1299,6 +1308,55 @@ const getLobbyCodeFromUrl = () => {
   return code.trim().toUpperCase();
 };
 
+const getLobbyDraftIdFromUrl = () => new URLSearchParams(window.location.search).get("draft")?.trim() ?? "";
+
+const createLobbyDraftId = () => {
+  if ("crypto" in window && typeof window.crypto.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
+const saveLobbyCreationDraft = (draft: LobbyCreationDraft) => {
+  window.sessionStorage.setItem(lobbyCreationDraftStorageKey, JSON.stringify(draft));
+};
+
+const getLobbyCreationDraft = (draftId = getLobbyDraftIdFromUrl()) => {
+  const storedDraft = window.sessionStorage.getItem(lobbyCreationDraftStorageKey);
+
+  if (!storedDraft || !draftId) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(storedDraft) as Partial<LobbyCreationDraft>;
+
+    if (
+      parsed.id !== draftId ||
+      typeof parsed.name !== "string" ||
+      typeof parsed.createdByUsername !== "string" ||
+      typeof parsed.createdByUserId !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      id: parsed.id,
+      createdByUserId: parsed.createdByUserId,
+      createdByUsername: parsed.createdByUsername,
+      name: parsed.name,
+      password: typeof parsed.password === "string" ? parsed.password : undefined
+    };
+  } catch {
+    return null;
+  }
+};
+
+const clearLobbyCreationDraft = () => {
+  window.sessionStorage.removeItem(lobbyCreationDraftStorageKey);
+};
+
 const getPointSystemStorageKey = (code: string) => `worldcup-point-system-${code}`;
 const getCustomSettingsStorageKey = (code: string) => `worldcup-custom-settings-${code}`;
 
@@ -1894,7 +1952,7 @@ const renderMyLobbiesPage = (selectedCopy: Copy) => `
 `;
 
 const renderPointSystemPage = (selectedCopy: Copy) => {
-  const lobbyCode = getLobbyCodeFromUrl();
+  const draft = getLobbyCreationDraft();
 
   return `
     <section class="point-system-section" id="point-system" aria-label="${selectedCopy.pointSystemPage.aria}">
@@ -1904,7 +1962,7 @@ const renderPointSystemPage = (selectedCopy: Copy) => {
         <p>${selectedCopy.pointSystemPage.summary}</p>
       </div>
       ${
-        !lobbyCode
+        !draft
           ? `<div class="matches-state">${selectedCopy.pointSystemPage.missingCode}</div>`
           : `
             <div class="point-system-grid">
@@ -2027,7 +2085,7 @@ const renderTrackedTeamDropdown = (selectedCopy: Copy, language: Language) => {
 };
 
 const renderCustomSettingsPage = (selectedCopy: Copy, language: Language) => {
-  const lobbyCode = getLobbyCodeFromUrl();
+  const draft = getLobbyCreationDraft();
 
   return `
     <section class="custom-settings-section" id="custom-settings" aria-label="${selectedCopy.customSettingsPage.aria}">
@@ -2037,7 +2095,7 @@ const renderCustomSettingsPage = (selectedCopy: Copy, language: Language) => {
         <p>${selectedCopy.customSettingsPage.summary}</p>
       </div>
       ${
-        !lobbyCode
+        !draft
           ? `<div class="matches-state">${selectedCopy.customSettingsPage.missingCode}</div>`
           : `
             <div class="custom-settings-layout">
@@ -2508,23 +2566,23 @@ const render = (language: Language) => {
   const currentPage = getCurrentPage();
 
   if (currentPage === "point-system") {
-    const lobbyCode = getLobbyCodeFromUrl();
-    const storedPointSystem = lobbyCode ? window.localStorage.getItem(getPointSystemStorageKey(lobbyCode)) : null;
+    const draftId = getLobbyDraftIdFromUrl();
+    const storedPointSystem = draftId ? window.sessionStorage.getItem(getPointSystemStorageKey(draftId)) : null;
 
-    if (selectedPointSystemLobbyCode !== lobbyCode) {
+    if (selectedPointSystemLobbyCode !== draftId) {
       selectedPointSystem =
         storedPointSystem === "simple" || storedPointSystem === "regular" || storedPointSystem === "custom"
           ? storedPointSystem
           : null;
-      selectedPointSystemLobbyCode = lobbyCode;
+      selectedPointSystemLobbyCode = draftId;
     }
   }
 
   if (currentPage === "custom-settings") {
-    const lobbyCode = getLobbyCodeFromUrl();
+    const draftId = getLobbyDraftIdFromUrl();
 
-    if (customSettingsLobbyCode !== lobbyCode) {
-      const storedSettings = lobbyCode ? window.localStorage.getItem(getCustomSettingsStorageKey(lobbyCode)) : null;
+    if (customSettingsLobbyCode !== draftId) {
+      const storedSettings = draftId ? window.sessionStorage.getItem(getCustomSettingsStorageKey(draftId)) : null;
 
       if (storedSettings) {
         try {
@@ -2568,7 +2626,7 @@ const render = (language: Language) => {
         };
       }
 
-      customSettingsLobbyCode = lobbyCode;
+      customSettingsLobbyCode = draftId;
     }
   }
 
@@ -2731,7 +2789,7 @@ const render = (language: Language) => {
       }
 
       selectedPointSystem = option;
-      selectedPointSystemLobbyCode = getLobbyCodeFromUrl();
+      selectedPointSystemLobbyCode = getLobbyDraftIdFromUrl();
       pointSystemSetupError = null;
       render(getStoredLanguage());
     });
@@ -2739,10 +2797,11 @@ const render = (language: Language) => {
 
   pointSystemContinueButton?.addEventListener("click", () => {
     if (selectedPointSystem === "custom") {
-      const lobbyCode = getLobbyCodeFromUrl();
+      const draftId = getLobbyDraftIdFromUrl();
 
-      if (lobbyCode) {
-        window.location.href = `/custom-settings.html?code=${encodeURIComponent(lobbyCode)}`;
+      if (draftId) {
+        window.sessionStorage.setItem(getPointSystemStorageKey(draftId), "custom");
+        window.location.href = `/custom-settings.html?draft=${encodeURIComponent(draftId)}`;
       }
 
       return;
@@ -3187,57 +3246,63 @@ const createLobbyFromHome = async (selectedCopy: Copy) => {
   };
   render(getStoredLanguage());
 
-  try {
-    const response = await fetch(`${lobbiesApiUrl}/lobbies`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        createdByUserId: user.id,
-        createdByUsername: user.username,
-        name: lobbyName,
-        password: createLobbyModal.usePassword ? createLobbyModal.password : undefined
-      })
-    });
+  const draft: LobbyCreationDraft = {
+    id: createLobbyDraftId(),
+    createdByUserId: user.id,
+    createdByUsername: user.username,
+    name: lobbyName,
+    password: createLobbyModal.usePassword ? createLobbyModal.password : undefined
+  };
 
-    if (!response.ok) {
-      const result = (await response.json().catch(() => ({}))) as { code?: string };
+  saveLobbyCreationDraft(draft);
+  window.location.href = `/point-system.html?draft=${encodeURIComponent(draft.id)}`;
+};
 
-      if (result.code === "invalid_password_policy") {
-        createLobbyModal = {
-          ...createLobbyModal,
-          message: selectedCopy.createLobby.invalidPassword,
-          isSubmitting: false
-        };
-        render(getStoredLanguage());
-        return;
-      }
+const createConfiguredLobby = async (
+  draft: LobbyCreationDraft,
+  selectedCopy: Copy,
+  pointSystem: PointSystemId,
+  customSettings?: Record<string, unknown>
+) => {
+  const response = await fetch(`${lobbiesApiUrl}/lobbies`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      createdByUserId: draft.createdByUserId,
+      createdByUsername: draft.createdByUsername,
+      name: draft.name,
+      password: draft.password,
+      pointSystem,
+      customSettings
+    })
+  });
 
-      throw new Error("Could not create lobby.");
+  if (!response.ok) {
+    const result = (await response.json().catch(() => ({}))) as { code?: string };
+
+    if (result.code === "invalid_password_policy") {
+      throw new Error(selectedCopy.createLobby.invalidPassword);
     }
 
-    const result = (await response.json()) as { lobby?: Lobby };
-
-    if (!result.lobby) {
-      throw new Error("Lobby response was empty.");
-    }
-
-    window.location.href = `/point-system.html?code=${encodeURIComponent(result.lobby.code)}`;
-  } catch {
-    createLobbyModal = {
-      ...createLobbyModal,
-      message: selectedCopy.lobbyActions.createError,
-      isSubmitting: false
-    };
-    render(getStoredLanguage());
+    throw new Error(selectedCopy.lobbyActions.createError);
   }
+
+  const result = (await response.json()) as { lobby?: Lobby };
+
+  if (!result.lobby) {
+    throw new Error(selectedCopy.lobbyActions.createError);
+  }
+
+  return result.lobby;
 };
 
 const savePointSystemSelection = async (selectedCopy: Copy) => {
-  const lobbyCode = getLobbyCodeFromUrl();
+  const draftId = getLobbyDraftIdFromUrl();
+  const draft = getLobbyCreationDraft(draftId);
 
-  if (!lobbyCode || !selectedPointSystem) {
+  if (!draft || !selectedPointSystem) {
     return;
   }
 
@@ -3245,25 +3310,13 @@ const savePointSystemSelection = async (selectedCopy: Copy) => {
   render(getStoredLanguage());
 
   try {
-    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/point-system`, {
-      method: "PUT",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        pointSystem: selectedPointSystem
-      })
-    });
+    const lobby = await createConfiguredLobby(draft, selectedCopy, selectedPointSystem);
 
-    if (!response.ok) {
-      throw new Error("Could not save point system.");
-    }
-
-    window.localStorage.setItem(getPointSystemStorageKey(lobbyCode), selectedPointSystem);
-    window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
-  } catch {
-    pointSystemSetupError = selectedCopy.pointSystemPage.saveError;
+    clearLobbyCreationDraft();
+    window.localStorage.setItem(getPointSystemStorageKey(lobby.code), selectedPointSystem);
+    window.location.href = `/lobby.html?code=${encodeURIComponent(lobby.code)}`;
+  } catch (error) {
+    pointSystemSetupError = error instanceof Error ? error.message : selectedCopy.pointSystemPage.saveError;
     render(getStoredLanguage());
   }
 };
@@ -3297,9 +3350,10 @@ const areCustomSettingsValid = () => {
 };
 
 const saveCustomSettings = async (selectedCopy: Copy) => {
-  const lobbyCode = getLobbyCodeFromUrl();
+  const draftId = getLobbyDraftIdFromUrl();
+  const draft = getLobbyCreationDraft(draftId);
 
-  if (!lobbyCode) {
+  if (!draft) {
     return;
   }
 
@@ -3320,34 +3374,24 @@ const saveCustomSettings = async (selectedCopy: Copy) => {
   render(getStoredLanguage());
 
   try {
-    const settings = {
+    const settings: Record<string, unknown> = {
       enabledFields: customSettingsState.enabledFields,
       values: customSettingsState.values,
       enabledFeatures: customSettingsState.enabledFeatures,
       trackedTeam: customSettingsState.trackedTeam
     };
-    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/custom-settings`, {
-      method: "PUT",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        settings
-      })
-    });
+    const lobby = await createConfiguredLobby(draft, selectedCopy, "custom", settings);
 
-    if (!response.ok) {
-      throw new Error("Could not save custom point system.");
-    }
-
-    window.localStorage.setItem(getPointSystemStorageKey(lobbyCode), "custom");
-    window.localStorage.setItem(getCustomSettingsStorageKey(lobbyCode), JSON.stringify(settings));
-    window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
-  } catch {
+    clearLobbyCreationDraft();
+    window.sessionStorage.removeItem(getPointSystemStorageKey(draftId));
+    window.sessionStorage.removeItem(getCustomSettingsStorageKey(draftId));
+    window.localStorage.setItem(getPointSystemStorageKey(lobby.code), "custom");
+    window.localStorage.setItem(getCustomSettingsStorageKey(lobby.code), JSON.stringify(settings));
+    window.location.href = `/lobby.html?code=${encodeURIComponent(lobby.code)}`;
+  } catch (error) {
     customSettingsState = {
       ...customSettingsState,
-      message: selectedCopy.customSettingsPage.saveError,
+      message: error instanceof Error ? error.message : selectedCopy.customSettingsPage.saveError,
       isSubmitting: false
     };
     render(getStoredLanguage());

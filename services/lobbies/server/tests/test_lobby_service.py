@@ -92,6 +92,33 @@ class LobbyServiceTest(unittest.TestCase):
         self.assertTrue(row["password_hash"].startswith("$argon2id$"))
         PasswordHasher().verify(row["password_hash"], "Worldcup1")
 
+    def test_create_lobby_can_start_with_point_system(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=7,
+            created_by_username="juan",
+            name="Friends",
+            point_system="regular",
+        )
+
+        self.assertEqual(lobby.point_system, "regular")
+        self.assertIsNone(lobby.custom_settings)
+
+    def test_create_lobby_can_start_with_custom_settings(self) -> None:
+        settings = {"values": {"exactScore": "5"}, "enabledFields": {"exactScore": True}}
+
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=7,
+            created_by_username="juan",
+            name="Friends",
+            point_system="custom",
+            custom_settings=settings,
+        )
+
+        self.assertEqual(lobby.point_system, "custom")
+        self.assertEqual(lobby.custom_settings, settings)
+
     def test_create_lobby_rejects_invalid_optional_password(self) -> None:
         with self.assertRaises(InvalidLobbyPasswordError):
             create_lobby(
@@ -99,6 +126,16 @@ class LobbyServiceTest(unittest.TestCase):
                 created_by_user_id=7,
                 created_by_username="juan",
                 password="password",
+            )
+
+    def test_create_lobby_rejects_custom_settings_without_custom_point_system(self) -> None:
+        with self.assertRaises(InvalidPointSystemError):
+            create_lobby(
+                self.connection,
+                created_by_user_id=7,
+                created_by_username="juan",
+                point_system="regular",
+                custom_settings={"values": {}},
             )
 
     def test_create_lobby_retries_when_code_collides(self) -> None:
