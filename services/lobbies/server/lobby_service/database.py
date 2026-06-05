@@ -16,6 +16,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = SERVICE_ROOT / "data" / "lobbies.sqlite3"
 LOBBY_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789"
 LOBBY_CODE_LENGTH = 4
+POINT_SYSTEMS = {"simple", "regular", "custom"}
 password_hasher = PasswordHasher(type=Type.ID)
 
 
@@ -53,6 +54,10 @@ class LobbyPermissionError(ValueError):
     pass
 
 
+class InvalidPointSystemError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class LobbyMemberRecord:
     user_id: int
@@ -66,6 +71,7 @@ class LobbyRecord:
     name: str
     requires_password: bool
     member_count: int
+    point_system: str | None
     members: list[LobbyMemberRecord]
 
 
@@ -92,6 +98,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           created_by_user_id INTEGER NOT NULL,
           password_hash TEXT,
           member_count INTEGER NOT NULL DEFAULT 0,
+          point_system TEXT CHECK (point_system IN ('simple', 'regular', 'custom')),
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -106,6 +113,11 @@ def initialize_database(connection: sqlite3.Connection) -> None:
 
     if "member_count" not in columns:
         connection.execute("ALTER TABLE lobbies ADD COLUMN member_count INTEGER NOT NULL DEFAULT 0")
+
+    if "point_system" not in columns:
+        connection.execute(
+            "ALTER TABLE lobbies ADD COLUMN point_system TEXT CHECK (point_system IN ('simple', 'regular', 'custom'))"
+        )
 
     connection.execute(
         """
@@ -353,11 +365,41 @@ def delete_lobby(
     connection.commit()
 
 
+def set_lobby_point_system(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    acting_user_id: int,
+    point_system: str,
+) -> LobbyRecord:
+    normalized_code = code.strip().upper()
+    normalized_point_system = point_system.strip().lower()
+    get_lobby(connection, normalized_code)
+
+    if normalized_point_system not in POINT_SYSTEMS:
+        raise InvalidPointSystemError("Point system is not supported.")
+
+    if not _is_lobby_admin(connection, normalized_code, acting_user_id):
+        raise LobbyPermissionError("Only lobby admins can choose the point system.")
+
+    connection.execute(
+        """
+        UPDATE lobbies
+        SET point_system = ?
+        WHERE code = ?
+        """,
+        (normalized_point_system, normalized_code),
+    )
+    connection.commit()
+
+    return get_lobby(connection, normalized_code)
+
+
 def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
     normalized_code = code.strip().upper()
     lobby = connection.execute(
         """
-        SELECT code, name, password_hash, member_count
+        SELECT code, name, password_hash, member_count, point_system
         FROM lobbies
         WHERE code = ?
         """,
@@ -382,6 +424,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
         name=str(lobby["name"]),
         requires_password=lobby["password_hash"] is not None,
         member_count=int(lobby["member_count"]),
+        point_system=str(lobby["point_system"]) if lobby["point_system"] else None,
         members=[
             LobbyMemberRecord(
                 user_id=int(row["user_id"]),

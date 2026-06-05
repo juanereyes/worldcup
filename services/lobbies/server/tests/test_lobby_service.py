@@ -11,6 +11,7 @@ from lobby_service import database
 from lobby_service.database import (
     InvalidLobbyPasswordCredentialsError,
     InvalidLobbyPasswordError,
+    InvalidPointSystemError,
     LOBBY_CODE_ALPHABET,
     LobbyCodeExhaustedError,
     LobbyMemberAlreadyExistsError,
@@ -27,6 +28,12 @@ from lobby_service.database import (
     list_user_lobbies,
     remove_lobby_member,
     remove_lobby_member_by_admin,
+    set_lobby_point_system,
+)
+from lobby_service.scoring import (
+    ScorePrediction,
+    score_simple_global_predictions,
+    score_simple_match_prediction,
 )
 
 
@@ -59,6 +66,7 @@ class LobbyServiceTest(unittest.TestCase):
         self.assertEqual(stored_lobby.code, stored_lobby.code.upper())
         self.assertEqual(stored_lobby.name, "Friends")
         self.assertEqual(stored_lobby.member_count, 1)
+        self.assertIsNone(stored_lobby.point_system)
         self.assertEqual(stored_lobby.members[0].username, "juan")
         self.assertEqual(stored_lobby.members[0].role, "admin")
         self.assertFalse(stored_lobby.requires_password)
@@ -391,6 +399,82 @@ class LobbyServiceTest(unittest.TestCase):
                 code=lobby.code,
                 acting_user_id=2,
             )
+
+    def test_admin_can_set_simple_point_system(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+
+        updated_lobby = set_lobby_point_system(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+            point_system="simple",
+        )
+
+        self.assertEqual(updated_lobby.point_system, "simple")
+        self.assertEqual(get_lobby(self.connection, lobby.code).point_system, "simple")
+
+    def test_non_admin_cannot_set_point_system(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        with self.assertRaises(LobbyPermissionError):
+            set_lobby_point_system(
+                self.connection,
+                code=lobby.code,
+                acting_user_id=2,
+                point_system="simple",
+            )
+
+    def test_set_point_system_rejects_unknown_setting(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+
+        with self.assertRaises(InvalidPointSystemError):
+            set_lobby_point_system(
+                self.connection,
+                code=lobby.code,
+                acting_user_id=1,
+                point_system="chaos",
+            )
+
+    def test_simple_match_scoring(self) -> None:
+        actual = ScorePrediction(home=2, away=1)
+
+        self.assertEqual(score_simple_match_prediction(ScorePrediction(home=2, away=1), actual), 4)
+        self.assertEqual(score_simple_match_prediction(ScorePrediction(home=3, away=1), actual), 2)
+        self.assertEqual(score_simple_match_prediction(ScorePrediction(home=1, away=1), actual), 0)
+
+    def test_simple_global_scoring(self) -> None:
+        points = score_simple_global_predictions(
+            {
+                "champion": "Brazil",
+                "runner_up": "Spain",
+                "top_scorer": "Mbappe",
+            },
+            {
+                "champion": "brazil",
+                "runner_up": "Argentina",
+                "top_scorer": " Mbappe ",
+            },
+        )
+
+        self.assertEqual(points, 23)
 
 
 if __name__ == "__main__":

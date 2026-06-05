@@ -81,6 +81,7 @@ type Lobby = {
   name: string;
   requiresPassword: boolean;
   memberCount: number;
+  pointSystem: PointSystemId | null;
   members: LobbyMember[];
 };
 
@@ -244,6 +245,7 @@ type Copy = {
     select: string;
     selected: string;
     continue: string;
+    saveError: string;
     disclaimerTitle: string;
     disclaimer: string;
     options: PointSystemOption[];
@@ -308,6 +310,7 @@ let lobbyError: string | null = null;
 let userLobbiesError: string | null = null;
 let selectedPointSystem: PointSystemId | null = null;
 let selectedPointSystemLobbyCode: string | null = null;
+let pointSystemSetupError: string | null = null;
 let createLobbyModal: CreateLobbyModalState = {
   isOpen: false,
   name: "",
@@ -671,6 +674,7 @@ const copy: Record<Language, Copy> = {
       select: "Select",
       selected: "Selected",
       continue: "Continue to lobby",
+      saveError: "Could not save the point system right now.",
       disclaimerTitle: "Prediction windows",
       disclaimer:
         "All match-specific prediction windows close one minute before the start of the respective game. Global predictions close either before the start of the first game or 24 hours after a player joins a lobby, whatever happens later.",
@@ -900,6 +904,7 @@ const copy: Record<Language, Copy> = {
       select: "Seleccionar",
       selected: "Seleccionado",
       continue: "Continuar al lobby",
+      saveError: "No se pudo guardar el sistema de puntos en este momento.",
       disclaimerTitle: "Ventanas de pronóstico",
       disclaimer:
         "Todas las ventanas de pronósticos sobre partidos específicos cierran un minuto antes del inicio de dicho partido. Los pronósticos globales cierran antes del inicio del primer partido o 24 horas después de que un jugador se una al lobby, lo que ocurra más tarde.",
@@ -1657,6 +1662,7 @@ const renderPointSystemPage = (selectedCopy: Copy) => {
               <strong>${selectedCopy.pointSystemPage.disclaimerTitle}</strong>
               <p>${selectedCopy.pointSystemPage.disclaimer}</p>
             </aside>
+            ${pointSystemSetupError ? `<p class="join-lobby-message">${pointSystemSetupError}</p>` : ""}
             <div class="point-system-footer">
               <button class="primary-action" type="button" id="point-system-continue" ${selectedPointSystem ? "" : "disabled"}>
                 ${selectedCopy.pointSystemPage.continue}
@@ -2235,19 +2241,13 @@ const render = (language: Language) => {
 
       selectedPointSystem = option;
       selectedPointSystemLobbyCode = getLobbyCodeFromUrl();
+      pointSystemSetupError = null;
       render(getStoredLanguage());
     });
   });
 
   pointSystemContinueButton?.addEventListener("click", () => {
-    const lobbyCode = getLobbyCodeFromUrl();
-
-    if (!lobbyCode || !selectedPointSystem) {
-      return;
-    }
-
-    window.localStorage.setItem(getPointSystemStorageKey(lobbyCode), selectedPointSystem);
-    window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
+    void savePointSystemSelection(selectedCopy);
   });
 
   createLobbyButton?.addEventListener("click", () => {
@@ -2621,6 +2621,40 @@ const createLobbyFromHome = async (selectedCopy: Copy) => {
       message: selectedCopy.lobbyActions.createError,
       isSubmitting: false
     };
+    render(getStoredLanguage());
+  }
+};
+
+const savePointSystemSelection = async (selectedCopy: Copy) => {
+  const lobbyCode = getLobbyCodeFromUrl();
+
+  if (!lobbyCode || !selectedPointSystem) {
+    return;
+  }
+
+  pointSystemSetupError = null;
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/point-system`, {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        pointSystem: selectedPointSystem
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not save point system.");
+    }
+
+    window.localStorage.setItem(getPointSystemStorageKey(lobbyCode), selectedPointSystem);
+    window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
+  } catch {
+    pointSystemSetupError = selectedCopy.pointSystemPage.saveError;
     render(getStoredLanguage());
   }
 };

@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from lobby_service.database import (
     InvalidLobbyPasswordCredentialsError,
     InvalidLobbyPasswordError,
+    InvalidPointSystemError,
     LobbyCodeExhaustedError,
     LobbyMemberAlreadyExistsError,
     LobbyMemberNotFoundError,
@@ -27,6 +28,7 @@ from lobby_service.database import (
     list_user_lobbies,
     remove_lobby_member,
     remove_lobby_member_by_admin,
+    set_lobby_point_system,
 )
 
 HOST = "127.0.0.1"
@@ -233,6 +235,51 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
         self.send_json(200, {"lobby": self.lobby_payload(lobby)})
 
+    def do_PUT(self) -> None:
+        parsed = urlparse(self.path)
+        path_parts = [part for part in parsed.path.split("/") if part]
+
+        if len(path_parts) == 3 and path_parts[0] == "lobbies" and path_parts[2] == "point-system":
+            self.set_lobby_point_system(path_parts[1])
+            return
+
+        self.send_json(404, {"error": "Not found."})
+
+    def set_lobby_point_system(self, code: str) -> None:
+        payload = self.read_json_body()
+
+        if payload is None:
+            self.send_json(400, {"error": "Request body must be valid JSON."})
+            return
+
+        point_system = str(payload.get("pointSystem", ""))
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                authenticated_user = self.get_authenticated_user()
+                lobby = set_lobby_point_system(
+                    connection,
+                    code=code,
+                    acting_user_id=int(authenticated_user["id"]),
+                    point_system=point_system,
+                )
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+            except InvalidPointSystemError as error:
+                self.send_json(400, {"code": "invalid_point_system", "error": str(error)})
+                return
+
+        self.send_json(200, {"lobby": self.lobby_payload(lobby)})
+
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         path_parts = [part for part in parsed.path.split("/") if part]
@@ -338,7 +385,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
         self.send_header("Access-Control-Allow-Origin", allowed_origin)
         self.send_header("Access-Control-Allow-Credentials", "true")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def lobby_payload(self, lobby: LobbyRecord) -> dict[str, Any]:
@@ -347,6 +394,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             "name": lobby.name,
             "requiresPassword": lobby.requires_password,
             "memberCount": lobby.member_count,
+            "pointSystem": lobby.point_system,
             "members": [
                 {
                     "userId": member.user_id,
