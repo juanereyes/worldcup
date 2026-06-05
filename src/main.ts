@@ -42,7 +42,19 @@ type CurrentUser = {
   displayName: string;
 };
 
-type Page = "home" | "groups" | "matches" | "bracket" | "lobby" | "my-lobbies";
+type Page = "home" | "groups" | "matches" | "bracket" | "lobby" | "my-lobbies" | "point-system";
+
+type PointSystemId = "simple" | "regular" | "custom";
+
+type PointSystemOption = {
+  id: PointSystemId;
+  name: string;
+  summary: string;
+  sections: Array<{
+    title: string;
+    items: string[];
+  }>;
+};
 
 type CarouselMatch = {
   id: number;
@@ -223,6 +235,19 @@ type Copy = {
     groupCode: string;
     members: string;
   };
+  pointSystemPage: {
+    title: string;
+    aria: string;
+    eyebrow: string;
+    summary: string;
+    missingCode: string;
+    select: string;
+    selected: string;
+    continue: string;
+    disclaimerTitle: string;
+    disclaimer: string;
+    options: PointSystemOption[];
+  };
   leaveLobby: {
     title: string;
     body: (name: string) => string;
@@ -281,6 +306,8 @@ let matchesError: string | null = null;
 let allMatchesError: string | null = null;
 let lobbyError: string | null = null;
 let userLobbiesError: string | null = null;
+let selectedPointSystem: PointSystemId | null = null;
+let selectedPointSystemLobbyCode: string | null = null;
 let createLobbyModal: CreateLobbyModalState = {
   isOpen: false,
   name: "",
@@ -635,6 +662,88 @@ const copy: Record<Language, Copy> = {
       groupCode: "Group code",
       members: "Members"
     },
+    pointSystemPage: {
+      title: "Choose a point system",
+      aria: "Lobby point system setup",
+      eyebrow: "Lobby setup",
+      summary: "Pick how this lobby will score predictions. You can review the structure now and enter the lobby after choosing one option.",
+      missingCode: "Create or open a lobby before choosing a point system.",
+      select: "Select",
+      selected: "Selected",
+      continue: "Continue to lobby",
+      disclaimerTitle: "Prediction windows",
+      disclaimer:
+        "All match-specific prediction windows close one minute before the start of the respective game. Global predictions close either before the start of the first game or 24 hours after a player joins a lobby, whatever happens later.",
+      options: [
+        {
+          id: "simple",
+          name: "Simple",
+          summary: "A compact setup for groups that want quick picks and easy scoring.",
+          sections: [
+            {
+              title: "Match Specific",
+              items: [
+                "Hitting the exact score = 4 pts",
+                "Hitting the correct result (A wins, B wins or Draw) = 2 pts",
+                "Wrong result = 0 pts"
+              ]
+            },
+            {
+              title: "Global",
+              items: ["Champion = 15 pts", "Runner-up = 10 pts", "Top scorer = 8 pts"]
+            }
+          ]
+        },
+        {
+          id: "regular",
+          name: "Regular",
+          summary: "A balanced setup with partial credit for close score predictions.",
+          sections: [
+            {
+              title: "Match Specific",
+              items: [
+                "Exact score = 5 pts",
+                "Correct Result + Correct goal difference if winner = 4 pts",
+                "Correct Result but not exact score = 3 pts",
+                "Wrong result + Correct goals home but incorrect away = 1 pt",
+                "Wrong result + Correct goals away but incorrect home = 1 pt"
+              ]
+            },
+            {
+              title: "Global",
+              items: [
+                "Champion = 20 pts",
+                "Runner-up = 12 pts",
+                "Third Place = 8 pts",
+                "Fourth Place = 6 pts",
+                "Top Scorer = 10 pts",
+                "Golden Ball = 8 pts"
+              ]
+            }
+          ]
+        },
+        {
+          id: "custom",
+          name: "Custom",
+          summary: "Start from the regular setup and add extra prediction layers.",
+          sections: [
+            {
+              title: "Regular scoring settings",
+              items: ["Choose from the settings in the regular setup while choosing scores."]
+            },
+            {
+              title: "Additional features",
+              items: [
+                "Choose your team: each player chooses one country to root for, and every match where this team plays has its points doubled.",
+                "Track a team: the admin sets a country to track, and players guess how far that country will make it.",
+                "Favorite player: players choose one player, and goal contributions award points at configurable milestones.",
+                "Bracket heavy: after the group stage, players guess who advances in every knockout stage, with later stages awarding more points."
+              ]
+            }
+          ]
+        }
+      ]
+    },
     leaveLobby: {
       title: "Leave lobby",
       body: (name) => `Are you sure you want to leave ${name}?`,
@@ -782,6 +891,88 @@ const copy: Record<Language, Copy> = {
       groupCode: "Código del grupo",
       members: "Miembros"
     },
+    pointSystemPage: {
+      title: "Elige un sistema de puntos",
+      aria: "Configuración del sistema de puntos del lobby",
+      eyebrow: "Configuración del lobby",
+      summary: "Elige cómo este lobby va a puntuar los pronósticos. Puedes revisar la estructura ahora y entrar al lobby después de seleccionar una opción.",
+      missingCode: "Crea o abre un lobby antes de elegir un sistema de puntos.",
+      select: "Seleccionar",
+      selected: "Seleccionado",
+      continue: "Continuar al lobby",
+      disclaimerTitle: "Ventanas de pronóstico",
+      disclaimer:
+        "Todas las ventanas de pronósticos sobre partidos específicos cierran un minuto antes del inicio de dicho partido. Los pronósticos globales cierran antes del inicio del primer partido o 24 horas después de que un jugador se una al lobby, lo que ocurra más tarde.",
+      options: [
+        {
+          id: "simple",
+          name: "Simple",
+          summary: "Una configuración compacta para grupos que quieren pronósticos rápidos y puntaje fácil.",
+          sections: [
+            {
+              title: "Específico por partido",
+              items: [
+                "Acertar el marcador exacto = 4 pts",
+                "Acertar el resultado correcto (A gana, B gana o empate) = 2 pts",
+                "Resultado incorrecto = 0 pts"
+              ]
+            },
+            {
+              title: "Global",
+              items: ["Campeón = 15 pts", "Subcampeón = 10 pts", "Goleador = 8 pts"]
+            }
+          ]
+        },
+        {
+          id: "regular",
+          name: "Regular",
+          summary: "Una configuración balanceada con crédito parcial para pronósticos cercanos.",
+          sections: [
+            {
+              title: "Específico por partido",
+              items: [
+                "Marcador exacto = 5 pts",
+                "Resultado correcto + diferencia de gol correcta si hay ganador = 4 pts",
+                "Resultado correcto pero no marcador exacto = 3 pts",
+                "Resultado incorrecto + goles del local correctos pero visitante incorrecto = 1 pt",
+                "Resultado incorrecto + goles del visitante correctos pero local incorrecto = 1 pt"
+              ]
+            },
+            {
+              title: "Global",
+              items: [
+                "Campeón = 20 pts",
+                "Subcampeón = 12 pts",
+                "Tercer lugar = 8 pts",
+                "Cuarto lugar = 6 pts",
+                "Goleador = 10 pts",
+                "Balón de Oro = 8 pts"
+              ]
+            }
+          ]
+        },
+        {
+          id: "custom",
+          name: "Personalizado",
+          summary: "Parte de la configuración regular y agrega capas extra de pronóstico.",
+          sections: [
+            {
+              title: "Configuración de puntaje regular",
+              items: ["Elige entre las opciones de la configuración regular con puntajes personalizados."]
+            },
+            {
+              title: "Funciones adicionales",
+              items: [
+                "Elige tu equipo: cada jugador escoge un país para apoyar; cada partido donde juegue ese equipo tendrá sus puntos duplicados.",
+                "Sigue un equipo: el administrador define un país a seguir; los jugadores predicen hasta que instancia llegará dicho equipo.",
+                "Jugador favorito: los jugadores eligen un futbolista; sus contribuciones de gol dan puntos en metas configurables.",
+                "Llave pesada: después de la fase de grupos, los jugadores predicen todo el cuadro de eliminación directa, con más puntos en rondas posteriores."
+              ]
+            }
+          ]
+        }
+      ]
+    },
     leaveLobby: {
       title: "Salir del lobby",
       body: (name) => `¿Seguro que quieres salir de ${name}?`,
@@ -836,6 +1027,13 @@ const getCurrentPage = (): Page => {
     return "lobby";
   }
 
+  if (
+    document.body.dataset.page === "point-system" ||
+    window.location.pathname.endsWith("/point-system.html")
+  ) {
+    return "point-system";
+  }
+
   if (document.body.dataset.page === "my-lobbies" || window.location.pathname.endsWith("/my-lobbies.html")) {
     return "my-lobbies";
   }
@@ -848,6 +1046,8 @@ const getLobbyCodeFromUrl = () => {
 
   return code.trim().toUpperCase();
 };
+
+const getPointSystemStorageKey = (code: string) => `worldcup-point-system-${code}`;
 
 const isLobbyPasswordValid = (password: string) =>
   password.length >= 8 &&
@@ -1406,6 +1606,68 @@ const renderMyLobbiesPage = (selectedCopy: Copy) => `
   </section>
 `;
 
+const renderPointSystemPage = (selectedCopy: Copy) => {
+  const lobbyCode = getLobbyCodeFromUrl();
+
+  return `
+    <section class="point-system-section" id="point-system" aria-label="${selectedCopy.pointSystemPage.aria}">
+      <div class="section-heading">
+        <p class="eyebrow">${selectedCopy.pointSystemPage.eyebrow}</p>
+        <h2>${selectedCopy.pointSystemPage.title}</h2>
+        <p>${selectedCopy.pointSystemPage.summary}</p>
+      </div>
+      ${
+        !lobbyCode
+          ? `<div class="matches-state">${selectedCopy.pointSystemPage.missingCode}</div>`
+          : `
+            <div class="point-system-grid">
+              ${selectedCopy.pointSystemPage.options
+                .map((option) => {
+                  const isSelected = selectedPointSystem === option.id;
+
+                  return `
+                    <article class="point-system-card ${isSelected ? "is-selected" : ""}">
+                      <div class="point-system-card-heading">
+                        <h3>${option.name}</h3>
+                        <p>${option.summary}</p>
+                      </div>
+                      <div class="point-system-rules">
+                        ${option.sections
+                          .map(
+                            (section) => `
+                              <div class="point-system-rule-section">
+                                <strong>${section.title}</strong>
+                                <ul>
+                                  ${section.items.map((item) => `<li>${item}</li>`).join("")}
+                                </ul>
+                              </div>
+                            `
+                          )
+                          .join("")}
+                      </div>
+                      <button class="${isSelected ? "primary-action" : "secondary-action"} point-system-select" type="button" data-point-system="${option.id}">
+                        ${isSelected ? selectedCopy.pointSystemPage.selected : selectedCopy.pointSystemPage.select}
+                      </button>
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>
+            <aside class="point-system-disclaimer">
+              <strong>${selectedCopy.pointSystemPage.disclaimerTitle}</strong>
+              <p>${selectedCopy.pointSystemPage.disclaimer}</p>
+            </aside>
+            <div class="point-system-footer">
+              <button class="primary-action" type="button" id="point-system-continue" ${selectedPointSystem ? "" : "disabled"}>
+                ${selectedCopy.pointSystemPage.continue}
+              </button>
+            </div>
+          `
+      }
+    </section>
+  `;
+};
+
 const renderCreateLobbyModal = (selectedCopy: Copy) => {
   if (!createLobbyModal.isOpen) {
     return "";
@@ -1807,13 +2069,28 @@ const render = (language: Language) => {
   const selectedCopy = copy[language];
   const selectedLanguage = languageOptions.find((option) => option.code === language);
   const currentPage = getCurrentPage();
+
+  if (currentPage === "point-system") {
+    const lobbyCode = getLobbyCodeFromUrl();
+    const storedPointSystem = lobbyCode ? window.localStorage.getItem(getPointSystemStorageKey(lobbyCode)) : null;
+
+    if (selectedPointSystemLobbyCode !== lobbyCode) {
+      selectedPointSystem =
+        storedPointSystem === "simple" || storedPointSystem === "regular" || storedPointSystem === "custom"
+          ? storedPointSystem
+          : null;
+      selectedPointSystemLobbyCode = lobbyCode;
+    }
+  }
+
   const pageContent = {
     bracket: renderBracketPage(selectedCopy, language),
     groups: renderStandings(selectedCopy, language),
     home: renderHomePage(selectedCopy, language),
     lobby: renderLobbyPage(selectedCopy),
     matches: renderMatchesPage(selectedCopy, language),
-    "my-lobbies": renderMyLobbiesPage(selectedCopy)
+    "my-lobbies": renderMyLobbiesPage(selectedCopy),
+    "point-system": renderPointSystemPage(selectedCopy)
   }[currentPage];
 
   document.documentElement.lang = language;
@@ -1864,6 +2141,8 @@ const render = (language: Language) => {
   const deleteLobbyCloseButton = document.querySelector<HTMLButtonElement>("#delete-lobby-close");
   const deleteLobbyCancelButton = document.querySelector<HTMLButtonElement>("#delete-lobby-cancel");
   const deleteLobbyConfirmButton = document.querySelector<HTMLButtonElement>("#delete-lobby-confirm");
+  const pointSystemButtons = document.querySelectorAll<HTMLButtonElement>("[data-point-system]");
+  const pointSystemContinueButton = document.querySelector<HTMLButtonElement>("#point-system-continue");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -1944,6 +2223,31 @@ const render = (language: Language) => {
       activeMatchIndex = (activeMatchIndex + direction + carouselMatches.length) % carouselMatches.length;
       render(getStoredLanguage());
     });
+  });
+
+  pointSystemButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const option = button.dataset.pointSystem as PointSystemId | undefined;
+
+      if (!option) {
+        return;
+      }
+
+      selectedPointSystem = option;
+      selectedPointSystemLobbyCode = getLobbyCodeFromUrl();
+      render(getStoredLanguage());
+    });
+  });
+
+  pointSystemContinueButton?.addEventListener("click", () => {
+    const lobbyCode = getLobbyCodeFromUrl();
+
+    if (!lobbyCode || !selectedPointSystem) {
+      return;
+    }
+
+    window.localStorage.setItem(getPointSystemStorageKey(lobbyCode), selectedPointSystem);
+    window.location.href = `/lobby.html?code=${encodeURIComponent(lobbyCode)}`;
   });
 
   createLobbyButton?.addEventListener("click", () => {
@@ -2310,7 +2614,7 @@ const createLobbyFromHome = async (selectedCopy: Copy) => {
       throw new Error("Lobby response was empty.");
     }
 
-    window.location.href = `/lobby.html?code=${encodeURIComponent(result.lobby.code)}`;
+    window.location.href = `/point-system.html?code=${encodeURIComponent(result.lobby.code)}`;
   } catch {
     createLobbyModal = {
       ...createLobbyModal,

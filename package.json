@@ -12,7 +12,7 @@
     "auth:build": "npm run build --workspace @worldcup/auth-client",
     "matches:dev": "C:\\Users\\juane\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe services\\matches\\server\\app.py",
     "lobbies:dev": "C:\\Users\\juane\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe services\\lobbies\\server\\app.py",
-    "build": "tsc && vite build && copy /Y dist\\index.html dist\\groups.html && copy /Y dist\\index.html dist\\matches.html && copy /Y dist\\index.html dist\\bracket.html && copy /Y dist\\index.html dist\\lobby.html && copy /Y dist\\index.html dist\\my-lobbies.html",
+    "build": "tsc && vite build && copy /Y dist\\index.html dist\\groups.html && copy /Y dist\\index.html dist\\matches.html && copy /Y dist\\index.html dist\\bracket.html && copy /Y dist\\index.html dist\\lobby.html && copy /Y dist\\index.html dist\\my-lobbies.html && copy /Y dist\\index.html dist\\point-system.html",
     "preview": "vite preview"
   },
   "devDependencies": {

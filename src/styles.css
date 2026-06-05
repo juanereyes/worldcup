@@ -648,6 +648,18 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   max-width: 820px;
 }
 
+.point-system-section {
+  margin: 72px auto 0;
+  max-width: 1180px;
+}
+
+.section-heading p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 10px 0 0;
+  max-width: 720px;
+}
+
 .matches-state {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -959,6 +971,105 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   padding: 20px 16px;
 }
 
+.point-system-grid {
+  align-items: stretch;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.point-system-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(24, 42, 34, 0.08);
+  display: grid;
+  gap: 18px;
+  grid-template-rows: auto 1fr auto;
+  padding: 20px;
+}
+
+.point-system-card.is-selected {
+  border-color: rgba(15, 107, 79, 0.48);
+  box-shadow: 0 0 0 3px rgba(15, 107, 79, 0.12), 0 20px 50px rgba(24, 42, 34, 0.08);
+}
+
+.point-system-card-heading {
+  display: grid;
+  gap: 8px;
+}
+
+.point-system-card-heading h3 {
+  color: var(--green-dark);
+  font-size: 1.35rem;
+  margin: 0;
+}
+
+.point-system-card-heading p,
+.point-system-disclaimer p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.point-system-rules {
+  display: grid;
+  gap: 16px;
+}
+
+.point-system-rule-section {
+  display: grid;
+  gap: 8px;
+}
+
+.point-system-rule-section strong,
+.point-system-disclaimer strong {
+  color: var(--green-dark);
+  font-size: 0.86rem;
+  text-transform: uppercase;
+}
+
+.point-system-rule-section ul {
+  color: var(--ink);
+  display: grid;
+  gap: 8px;
+  line-height: 1.4;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.point-system-rule-section li {
+  padding-left: 2px;
+}
+
+.point-system-select {
+  justify-content: center;
+  width: 100%;
+}
+
+.point-system-disclaimer {
+  background: #f6f8f3;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 16px;
+}
+
+.point-system-footer {
+  background: rgba(250, 251, 247, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  bottom: 18px;
+  box-shadow: 0 18px 48px rgba(24, 42, 34, 0.12);
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+  padding: 14px;
+  position: sticky;
+}
+
 .modal-backdrop {
   align-items: center;
   background: rgba(27, 31, 35, 0.34);
@@ -1240,6 +1351,19 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   .lobby-card-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .point-system-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .point-system-footer {
+    bottom: 10px;
+  }
+
+  .point-system-footer .primary-action {
+    justify-content: center;
+    width: 100%;
   }
 
   .my-lobby-meta {
