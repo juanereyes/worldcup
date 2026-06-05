@@ -2014,13 +2014,17 @@ const renderPointSystemPage = (selectedCopy: Copy) => {
   `;
 };
 
-const renderCustomNumberField = (selectedCopy: Copy, field: CustomNumericFieldId) => {
-  const isEnabled = customSettingsState.enabledFields[field];
+const renderCustomNumberField = (selectedCopy: Copy, field: CustomNumericFieldId, options = { toggleable: true }) => {
+  const isEnabled = options.toggleable ? customSettingsState.enabledFields[field] : true;
 
   return `
     <label class="custom-setting-row">
       <span class="custom-setting-toggle">
-        <input type="checkbox" data-custom-field-toggle="${field}" ${isEnabled ? "checked" : ""} />
+        ${
+          options.toggleable
+            ? `<input type="checkbox" data-custom-field-toggle="${field}" ${isEnabled ? "checked" : ""} />`
+            : ""
+        }
       </span>
       <span class="custom-setting-label">${selectedCopy.customSettingsPage.fields[field]}</span>
       <input
@@ -2130,7 +2134,9 @@ const renderCustomSettingsPage = (selectedCopy: Copy, language: Language) => {
                     ${
                       customSettingsState.enabledFeatures.favoritePlayer
                         ? `<div class="custom-settings-list compact-custom-list">
-                            ${favoritePlayerCustomFields.map((field) => renderCustomNumberField(selectedCopy, field)).join("")}
+                            ${favoritePlayerCustomFields
+                              .map((field) => renderCustomNumberField(selectedCopy, field, { toggleable: false }))
+                              .join("")}
                           </div>`
                         : ""
                     }
@@ -3330,9 +3336,13 @@ const getRequiredCustomFields = () => [
 
 const areCustomSettingsValid = () => {
   const requiredFields = getRequiredCustomFields();
-  const hasInvalidNumber = requiredFields.some(
-    (field) => customSettingsState.enabledFields[field] && !isNonNegativeIntegerValue(customSettingsState.values[field])
-  );
+  const hasInvalidNumber = requiredFields.some((field) => {
+    const isRequiredByFeature =
+      customSettingsState.enabledFeatures.favoritePlayer && favoritePlayerCustomFields.includes(field);
+    const shouldValidate = isRequiredByFeature || customSettingsState.enabledFields[field];
+
+    return shouldValidate && !isNonNegativeIntegerValue(customSettingsState.values[field]);
+  });
 
   if (hasInvalidNumber) {
     return false;
