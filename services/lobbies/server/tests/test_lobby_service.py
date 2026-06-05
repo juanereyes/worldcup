@@ -32,6 +32,8 @@ from lobby_service.database import (
 )
 from lobby_service.scoring import (
     ScorePrediction,
+    score_regular_global_predictions,
+    score_regular_match_prediction,
     score_simple_global_predictions,
     score_simple_match_prediction,
 )
@@ -417,6 +419,22 @@ class LobbyServiceTest(unittest.TestCase):
         self.assertEqual(updated_lobby.point_system, "simple")
         self.assertEqual(get_lobby(self.connection, lobby.code).point_system, "simple")
 
+    def test_admin_can_set_regular_point_system(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+
+        updated_lobby = set_lobby_point_system(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+            point_system="regular",
+        )
+
+        self.assertEqual(updated_lobby.point_system, "regular")
+
     def test_non_admin_cannot_set_point_system(self) -> None:
         lobby = create_lobby(
             self.connection,
@@ -475,6 +493,78 @@ class LobbyServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(points, 23)
+
+    def test_regular_match_scoring_exact_score(self) -> None:
+        points = score_regular_match_prediction(
+            ScorePrediction(home=2, away=1),
+            ScorePrediction(home=2, away=1),
+        )
+
+        self.assertEqual(points, 5)
+
+    def test_regular_match_scoring_correct_winner_and_goal_difference(self) -> None:
+        points = score_regular_match_prediction(
+            ScorePrediction(home=3, away=1),
+            ScorePrediction(home=2, away=0),
+        )
+
+        self.assertEqual(points, 4)
+
+    def test_regular_match_scoring_correct_result_without_exact_score(self) -> None:
+        winner_points = score_regular_match_prediction(
+            ScorePrediction(home=4, away=1),
+            ScorePrediction(home=2, away=0),
+        )
+        draw_points = score_regular_match_prediction(
+            ScorePrediction(home=2, away=2),
+            ScorePrediction(home=1, away=1),
+        )
+
+        self.assertEqual(winner_points, 3)
+        self.assertEqual(draw_points, 3)
+
+    def test_regular_match_scoring_wrong_result_with_one_correct_goal(self) -> None:
+        home_goal_points = score_regular_match_prediction(
+            ScorePrediction(home=2, away=2),
+            ScorePrediction(home=2, away=1),
+        )
+        away_goal_points = score_regular_match_prediction(
+            ScorePrediction(home=1, away=1),
+            ScorePrediction(home=2, away=1),
+        )
+
+        self.assertEqual(home_goal_points, 1)
+        self.assertEqual(away_goal_points, 1)
+
+    def test_regular_match_scoring_wrong_result_without_correct_goals(self) -> None:
+        points = score_regular_match_prediction(
+            ScorePrediction(home=0, away=2),
+            ScorePrediction(home=2, away=1),
+        )
+
+        self.assertEqual(points, 0)
+
+    def test_regular_global_scoring(self) -> None:
+        points = score_regular_global_predictions(
+            {
+                "champion": "Brazil",
+                "runner_up": "Spain",
+                "third_place": "France",
+                "fourth_place": "Portugal",
+                "top_scorer": "Mbappe",
+                "golden_ball": "Vinicius",
+            },
+            {
+                "champion": "brazil",
+                "runner_up": "Argentina",
+                "third_place": "France",
+                "fourth_place": "Portugal",
+                "top_scorer": "Haaland",
+                "golden_ball": " vinicius ",
+            },
+        )
+
+        self.assertEqual(points, 42)
 
 
 if __name__ == "__main__":

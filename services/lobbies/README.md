@@ -20,3 +20,7 @@ The service listens on `http://127.0.0.1:8003`.
 - `DELETE /lobbies/{code}/members/{userId}` removes a user from a lobby. If the authenticated session belongs to an admin, it can remove a non-admin member.
 - `DELETE /lobbies/{code}` deletes a lobby when the authenticated session belongs to a lobby admin.
 - `GET /users/{userId}/lobbies` returns every lobby a user belongs to.
+
+## Scoring
+
+- `simple` and `regular` scoring rules are implemented in the lobby service.
