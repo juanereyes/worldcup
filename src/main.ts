@@ -253,6 +253,13 @@ type Copy = {
     leaveLobby: string;
     kickMember: string;
     deleteLobby: string;
+    showRules: string;
+    closeRules: string;
+    rulesTitle: string;
+    pointSystem: string;
+    rulesUnavailable: string;
+    customRulesTitle: string;
+    enabledFeatures: string;
   };
   lobbyActions: {
     joinTitle: string;
@@ -429,6 +436,7 @@ let matchesError: string | null = null;
 let allMatchesError: string | null = null;
 let lobbyError: string | null = null;
 let userLobbiesError: string | null = null;
+let areLobbyRulesVisible = false;
 let selectedPointSystem: PointSystemId | null = null;
 let selectedPointSystemLobbyCode: string | null = null;
 let pointSystemSetupError: string | null = null;
@@ -758,7 +766,14 @@ const copy: Record<Language, Copy> = {
       groupCode: "Group code",
       leaveLobby: "Leave lobby",
       kickMember: "Kick",
-      deleteLobby: "Delete lobby"
+      deleteLobby: "Delete lobby",
+      showRules: "View rules",
+      closeRules: "Close rules",
+      rulesTitle: "Lobby rules",
+      pointSystem: "Point system",
+      rulesUnavailable: "Rules are not available for this lobby yet.",
+      customRulesTitle: "Custom scoring values",
+      enabledFeatures: "Enabled features"
     },
     lobbyActions: {
       joinTitle: "Join a group",
@@ -1047,7 +1062,14 @@ const copy: Record<Language, Copy> = {
       groupCode: "Código del grupo",
       leaveLobby: "Salir del lobby",
       kickMember: "Expulsar",
-      deleteLobby: "Eliminar lobby"
+      deleteLobby: "Eliminar lobby",
+      showRules: "Ver reglas",
+      closeRules: "Cerrar reglas",
+      rulesTitle: "Reglas del lobby",
+      pointSystem: "Sistema de puntos",
+      rulesUnavailable: "Las reglas todavía no están disponibles para este lobby.",
+      customRulesTitle: "Valores de puntaje personalizado",
+      enabledFeatures: "Funciones activas"
     },
     lobbyActions: {
       joinTitle: "Unirse a un grupo",
@@ -1655,6 +1677,164 @@ const renderMatchCarousel = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const formatRulePoints = (value: string | undefined) => `${value ?? "0"} pts`;
+
+const renderLobbyRuleText = (item: string) => {
+  const equalsIndex = item.indexOf("=");
+
+  if (equalsIndex === -1) {
+    return item;
+  }
+
+  const label = item.slice(0, equalsIndex).trimEnd();
+  const value = item.slice(equalsIndex).trim();
+
+  return `<span>${label} </span><strong>${value}</strong>`;
+};
+
+const getCustomRuleValue = (lobby: Lobby, field: CustomNumericFieldId) => lobby.customSettings?.values?.[field] ?? "0";
+
+const isCustomRuleEnabled = (lobby: Lobby, field: CustomNumericFieldId) =>
+  Boolean(lobby.customSettings?.enabledFields?.[field]);
+
+const isCustomFeatureEnabled = (lobby: Lobby, feature: CustomFeatureId) =>
+  Boolean(lobby.customSettings?.enabledFeatures?.[feature]);
+
+const renderCustomRuleList = (selectedCopy: Copy, lobby: Lobby, fields: CustomNumericFieldId[]) => {
+  const items = fields.filter((field) => isCustomRuleEnabled(lobby, field));
+
+  if (items.length === 0) {
+    return `<p>${selectedCopy.lobbyPage.rulesUnavailable}</p>`;
+  }
+
+  return `
+    <ul>
+      ${items
+        .map(
+          (field) =>
+            `<li><span>${selectedCopy.customSettingsPage.fields[field]} </span><strong>= ${formatRulePoints(getCustomRuleValue(lobby, field))}</strong></li>`
+        )
+        .join("")}
+    </ul>
+  `;
+};
+
+const renderCustomFeatureRules = (selectedCopy: Copy, language: Language, lobby: Lobby) => {
+  const featureItems: string[] = [];
+
+  if (isCustomFeatureEnabled(lobby, "chooseTeam")) {
+    featureItems.push(
+      `<li><span>${selectedCopy.customSettingsPage.features.chooseTeam.label}</span><p>${selectedCopy.customSettingsPage.features.chooseTeam.detail}</p></li>`
+    );
+  }
+
+  if (isCustomFeatureEnabled(lobby, "trackTeam")) {
+    const trackedTeam = lobby.customSettings?.trackedTeam
+      ? getTeamDisplayName(lobby.customSettings.trackedTeam, language)
+      : selectedCopy.customSettingsPage.trackedTeamPlaceholder;
+
+    featureItems.push(
+      `<li><span>${selectedCopy.customSettingsPage.features.trackTeam.label}: ${trackedTeam}</span><p>${selectedCopy.customSettingsPage.features.trackTeam.detail}</p></li>`
+    );
+  }
+
+  if (isCustomFeatureEnabled(lobby, "favoritePlayer")) {
+    featureItems.push(
+      `<li><span>${selectedCopy.customSettingsPage.features.favoritePlayer.label}</span><p>${selectedCopy.customSettingsPage.features.favoritePlayer.detail}</p><strong>${selectedCopy.customSettingsPage.fields.favoritePlayerContributions}: ${getCustomRuleValue(lobby, "favoritePlayerContributions")} | ${selectedCopy.customSettingsPage.fields.favoritePlayerPoints}: ${formatRulePoints(getCustomRuleValue(lobby, "favoritePlayerPoints"))}</strong></li>`
+    );
+  }
+
+  if (isCustomFeatureEnabled(lobby, "bracketHeavy")) {
+    featureItems.push(`
+      <li>
+        <span>${selectedCopy.customSettingsPage.features.bracketHeavy.label}</span>
+        <p>${selectedCopy.customSettingsPage.features.bracketHeavy.detail}</p>
+        <div class="lobby-rules-mini-grid">
+          ${bracketHeavyCustomFields
+            .map(
+              (field) => `
+                <span>${selectedCopy.customSettingsPage.fields[field]}</span>
+                <strong>${formatRulePoints(getCustomRuleValue(lobby, field))}</strong>
+              `
+            )
+            .join("")}
+        </div>
+      </li>
+    `);
+  }
+
+  if (featureItems.length === 0) {
+    return `<p>${selectedCopy.lobbyPage.rulesUnavailable}</p>`;
+  }
+
+  return `<ul class="lobby-feature-rules">${featureItems.join("")}</ul>`;
+};
+
+const renderLobbyRulesPanel = (selectedCopy: Copy, language: Language, lobby: Lobby) => {
+  const selectedPointSystemOption = selectedCopy.pointSystemPage.options.find((option) => option.id === lobby.pointSystem);
+
+  if (!lobby.pointSystem || !selectedPointSystemOption) {
+    return `
+      <section class="lobby-rules-panel">
+        <h3>${selectedCopy.lobbyPage.rulesTitle}</h3>
+        <p>${selectedCopy.lobbyPage.rulesUnavailable}</p>
+      </section>
+    `;
+  }
+
+  if (lobby.pointSystem !== "custom") {
+    return `
+      <section class="lobby-rules-panel">
+        <div class="lobby-rules-heading">
+          <span>${selectedCopy.lobbyPage.pointSystem}</span>
+          <strong>${selectedPointSystemOption.name}</strong>
+        </div>
+        <p>${selectedPointSystemOption.summary}</p>
+        <div class="lobby-rules-grid">
+          ${selectedPointSystemOption.sections
+            .map(
+              (section) => `
+                <div class="lobby-rules-section">
+                  <h4>${section.title}</h4>
+                  <ul>
+                    ${section.items.map((item) => `<li>${renderLobbyRuleText(item)}</li>`).join("")}
+                  </ul>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+        <aside>${selectedCopy.pointSystemPage.disclaimer}</aside>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="lobby-rules-panel">
+      <div class="lobby-rules-heading">
+        <span>${selectedCopy.lobbyPage.pointSystem}</span>
+        <strong>${selectedPointSystemOption.name}</strong>
+      </div>
+      <p>${selectedCopy.lobbyPage.customRulesTitle}</p>
+      <div class="lobby-rules-grid">
+        <div class="lobby-rules-section">
+          <h4>${selectedCopy.customSettingsPage.matchSpecific}</h4>
+          ${renderCustomRuleList(selectedCopy, lobby, matchSpecificCustomFields)}
+        </div>
+        <div class="lobby-rules-section">
+          <h4>${selectedCopy.customSettingsPage.global}</h4>
+          ${renderCustomRuleList(selectedCopy, lobby, globalCustomFields)}
+        </div>
+      </div>
+      <div class="lobby-rules-section lobby-rules-section-wide">
+        <h4>${selectedCopy.lobbyPage.enabledFeatures}</h4>
+        ${renderCustomFeatureRules(selectedCopy, language, lobby)}
+      </div>
+      <aside>${selectedCopy.pointSystemPage.disclaimer}</aside>
+    </section>
+  `;
+};
+
 const renderMatchListItem = (match: CarouselMatch, selectedCopy: Copy, language: Language) => {
   const hasScore = match.score.home !== null && match.score.away !== null;
   const status = getMatchStatusLabel(match.status, selectedCopy);
@@ -1833,7 +2013,7 @@ const renderBracketPage = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
-const renderLobbyPage = (selectedCopy: Copy) => {
+const renderLobbyPage = (selectedCopy: Copy, language: Language) => {
   const lobbyCode = getLobbyCodeFromUrl();
   const isAdmin = isCurrentUserLobbyAdmin(currentLobby);
 
@@ -1860,6 +2040,9 @@ const renderLobbyPage = (selectedCopy: Copy) => {
                           <span>${selectedCopy.lobbyPage.groupCode}</span>
                           <strong>${currentLobby.code}</strong>
                         </span>
+                        <button class="secondary-action compact-secondary-action" type="button" id="lobby-rules-toggle">
+                          ${selectedCopy.lobbyPage.showRules}
+                        </button>
                         ${
                           currentUser && currentLobby.members.some((member) => member.userId === currentUser?.id)
                             ? `<button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>`
@@ -2390,6 +2573,26 @@ const renderDeleteLobbyModal = (selectedCopy: Copy) => {
   `;
 };
 
+const renderLobbyRulesModal = (selectedCopy: Copy, language: Language) => {
+  if (!areLobbyRulesVisible || !currentLobby) {
+    return "";
+  }
+
+  return `
+    <div class="modal-backdrop" role="presentation" id="lobby-rules-backdrop">
+      <section class="join-lobby-modal lobby-rules-modal" role="dialog" aria-modal="true" aria-labelledby="lobby-rules-title">
+        <div class="modal-header">
+          <h2 id="lobby-rules-title">${selectedCopy.lobbyPage.rulesTitle}</h2>
+          <button class="modal-close" type="button" id="lobby-rules-close" aria-label="${selectedCopy.lobbyPage.closeRules}">
+            ×
+          </button>
+        </div>
+        ${renderLobbyRulesPanel(selectedCopy, language, currentLobby)}
+      </section>
+    </div>
+  `;
+};
+
 const renderStandings = (selectedCopy: Copy, language: Language) => {
   const standings = getComputedStandings();
 
@@ -2641,7 +2844,7 @@ const render = (language: Language) => {
     "custom-settings": renderCustomSettingsPage(selectedCopy, language),
     groups: renderStandings(selectedCopy, language),
     home: renderHomePage(selectedCopy, language),
-    lobby: renderLobbyPage(selectedCopy),
+    lobby: renderLobbyPage(selectedCopy, language),
     matches: renderMatchesPage(selectedCopy, language),
     "my-lobbies": renderMyLobbiesPage(selectedCopy),
     "point-system": renderPointSystemPage(selectedCopy)
@@ -2659,6 +2862,7 @@ const render = (language: Language) => {
   ${renderLeaveLobbyModal(selectedCopy)}
   ${renderKickMemberModal(selectedCopy)}
   ${renderDeleteLobbyModal(selectedCopy)}
+  ${renderLobbyRulesModal(selectedCopy, language)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -2691,6 +2895,9 @@ const render = (language: Language) => {
   const kickMemberCancelButton = document.querySelector<HTMLButtonElement>("#kick-member-cancel");
   const kickMemberConfirmButton = document.querySelector<HTMLButtonElement>("#kick-member-confirm");
   const deleteLobbyButtons = document.querySelectorAll<HTMLButtonElement>("[data-delete-lobby-code]");
+  const lobbyRulesToggle = document.querySelector<HTMLButtonElement>("#lobby-rules-toggle");
+  const lobbyRulesBackdrop = document.querySelector<HTMLDivElement>("#lobby-rules-backdrop");
+  const lobbyRulesCloseButton = document.querySelector<HTMLButtonElement>("#lobby-rules-close");
   const deleteLobbyInput = document.querySelector<HTMLInputElement>("#delete-lobby-confirmation");
   const deleteLobbyCloseButton = document.querySelector<HTMLButtonElement>("#delete-lobby-close");
   const deleteLobbyCancelButton = document.querySelector<HTMLButtonElement>("#delete-lobby-cancel");
@@ -2785,6 +2992,35 @@ const render = (language: Language) => {
       render(getStoredLanguage());
     });
   });
+
+  lobbyRulesToggle?.addEventListener("click", () => {
+    areLobbyRulesVisible = true;
+    render(getStoredLanguage());
+  });
+
+  const closeLobbyRulesModal = () => {
+    areLobbyRulesVisible = false;
+    render(getStoredLanguage());
+  };
+
+  lobbyRulesCloseButton?.addEventListener("click", closeLobbyRulesModal);
+  lobbyRulesBackdrop?.addEventListener("click", (event) => {
+    if (event.target === lobbyRulesBackdrop) {
+      closeLobbyRulesModal();
+    }
+  });
+
+  if (areLobbyRulesVisible) {
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape") {
+          closeLobbyRulesModal();
+        }
+      },
+      { once: true }
+    );
+  }
 
   pointSystemButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -3737,6 +3973,7 @@ const loadLobby = async () => {
   isLobbyLoading = true;
   lobbyError = null;
   currentLobby = null;
+  areLobbyRulesVisible = false;
   render(getStoredLanguage());
 
   try {
