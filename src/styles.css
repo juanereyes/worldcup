@@ -1168,6 +1168,19 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   min-height: 38px;
 }
 
+.global-prediction-option {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.global-prediction-option .match-team-flag {
+  flex: 0 0 auto;
+  height: 16px;
+  width: 24px;
+}
+
 .lobby-member-list {
   display: grid;
   list-style: none;
@@ -1646,6 +1659,14 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   max-width: 820px;
   overflow: auto;
   width: min(100%, 820px);
+}
+
+.global-placement-modal {
+  overflow: visible;
+}
+
+.global-placement-country-control {
+  margin-bottom: 18px;
 }
 
 .modal-header,
