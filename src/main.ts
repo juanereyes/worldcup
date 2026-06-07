@@ -1,4 +1,5 @@
 import "./styles.css";
+import { playerGuide } from "./playerGuide";
 
 type Language = "en" | "es";
 
@@ -200,11 +201,19 @@ type PredictionCopyModalState = {
 };
 
 type GlobalPlacementPredictionId = "champion" | "runnerUp" | "thirdPlace" | "fourthPlace";
+type PlayerPredictionId = "topScorer" | "goldenBall" | "favoritePlayer";
+
+type PlayerPredictionSelection = {
+  country: string;
+  name: string;
+  number: number;
+};
 
 type GlobalPredictionOption = {
   id: CustomNumericFieldId;
   label: string;
   isPlacement: boolean;
+  isPlayer: boolean;
 };
 
 type GlobalPlacementPredictionModalState = {
@@ -220,6 +229,27 @@ type TrackTeamModalState = {
   selectedTeam: string;
   isMenuOpen: boolean;
   searchQuery: string;
+};
+
+type ChooseTeamModalState = {
+  isOpen: boolean;
+  lobby: Lobby | null;
+  selectedTeam: string;
+  isMenuOpen: boolean;
+  searchQuery: string;
+};
+
+type PlayerPredictionModalState = {
+  isOpen: boolean;
+  lobby: Lobby | null;
+  predictionId: PlayerPredictionId | null;
+  selectedCountry: string;
+  selectedPlayerName: string;
+  selectedPlayerNumber: number | null;
+  isCountryMenuOpen: boolean;
+  isPlayerMenuOpen: boolean;
+  countrySearchQuery: string;
+  playerSearchQuery: string;
 };
 
 type Copy = {
@@ -299,8 +329,11 @@ type Copy = {
     myPredictions: string;
     globalPredictions: string;
     chooseGlobalPrediction: (prediction: string) => string;
+    choosePlayerPrediction: (prediction: string) => string;
     chooseCountry: string;
+    choosePlayer: string;
     searchCountry: string;
+    searchPlayer: string;
     confirmGlobalPrediction: string;
     closeRules: string;
     rulesTitle: string;
@@ -540,6 +573,25 @@ let trackTeamModal: TrackTeamModalState = {
   selectedTeam: "",
   isMenuOpen: false,
   searchQuery: ""
+};
+let chooseTeamModal: ChooseTeamModalState = {
+  isOpen: false,
+  lobby: null,
+  selectedTeam: "",
+  isMenuOpen: false,
+  searchQuery: ""
+};
+let playerPredictionModal: PlayerPredictionModalState = {
+  isOpen: false,
+  lobby: null,
+  predictionId: null,
+  selectedCountry: "",
+  selectedPlayerName: "",
+  selectedPlayerNumber: null,
+  isCountryMenuOpen: false,
+  isPlayerMenuOpen: false,
+  countrySearchQuery: "",
+  playerSearchQuery: ""
 };
 let createLobbyModal: CreateLobbyModalState = {
   isOpen: false,
@@ -876,8 +928,11 @@ const copy: Record<Language, Copy> = {
       myPredictions: "My predictions",
       globalPredictions: "Global predictions",
       chooseGlobalPrediction: (prediction) => `Choose the ${prediction} of the competition.`,
+      choosePlayerPrediction: (prediction) => `Choose the ${prediction} of the competition.`,
       chooseCountry: "Choose a country",
+      choosePlayer: "Choose a player",
       searchCountry: "Search country",
+      searchPlayer: "Search player",
       confirmGlobalPrediction: "Confirm selection",
       closeRules: "Close rules",
       rulesTitle: "Lobby rules",
@@ -1208,8 +1263,11 @@ const copy: Record<Language, Copy> = {
       myPredictions: "Mis pronósticos",
       globalPredictions: "Pronósticos globales",
       chooseGlobalPrediction: (prediction) => `Elige el ${prediction} de la competición.`,
+      choosePlayerPrediction: (prediction) => `Elige el ${prediction} de la competición.`,
       chooseCountry: "Elige un país",
+      choosePlayer: "Elige un jugador",
       searchCountry: "Buscar país",
+      searchPlayer: "Buscar jugador",
       confirmGlobalPrediction: "Confirmar selección",
       closeRules: "Cerrar reglas",
       rulesTitle: "Reglas del lobby",
@@ -1565,6 +1623,10 @@ const getPointSystemStorageKey = (code: string) => `worldcup-point-system-${code
 const getCustomSettingsStorageKey = (code: string) => `worldcup-custom-settings-${code}`;
 const getGlobalPlacementPredictionsStorageKey = (lobby: Lobby) =>
   `worldcup-global-placement-predictions-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
+const getChooseTeamStorageKey = (lobby: Lobby) =>
+  `worldcup-choose-team-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
+const getPlayerPredictionsStorageKey = (lobby: Lobby) =>
+  `worldcup-player-predictions-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
 
 const getStoredGlobalPlacementPredictions = (lobby: Lobby): Partial<Record<GlobalPlacementPredictionId, string>> => {
   const storedPredictions = window.localStorage.getItem(getGlobalPlacementPredictionsStorageKey(lobby));
@@ -1600,6 +1662,71 @@ const saveStoredGlobalPlacementPrediction = (
   window.localStorage.setItem(getGlobalPlacementPredictionsStorageKey(lobby), JSON.stringify(predictions));
 };
 
+const getStoredChooseTeam = (lobby: Lobby) => window.localStorage.getItem(getChooseTeamStorageKey(lobby)) ?? "";
+
+const saveStoredChooseTeam = (lobby: Lobby, teamName: string) => {
+  window.localStorage.setItem(getChooseTeamStorageKey(lobby), teamName);
+};
+
+const isPlayerPredictionId = (predictionId: CustomNumericFieldId | CustomFeatureId): predictionId is PlayerPredictionId =>
+  predictionId === "topScorer" || predictionId === "goldenBall" || predictionId === "favoritePlayer";
+
+const getStoredPlayerPredictions = (
+  lobby: Lobby
+): Partial<Record<PlayerPredictionId, PlayerPredictionSelection>> => {
+  const storedPredictions = window.localStorage.getItem(getPlayerPredictionsStorageKey(lobby));
+
+  if (!storedPredictions) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(storedPredictions) as Partial<Record<PlayerPredictionId, Partial<PlayerPredictionSelection>>>;
+    const sanitizeSelection = (selection: Partial<PlayerPredictionSelection> | undefined) => {
+      if (
+        !selection ||
+        typeof selection.country !== "string" ||
+        typeof selection.name !== "string" ||
+        typeof selection.number !== "number"
+      ) {
+        return undefined;
+      }
+
+      return {
+        country: selection.country,
+        name: selection.name,
+        number: selection.number
+      };
+    };
+
+    return {
+      topScorer: sanitizeSelection(parsed.topScorer),
+      goldenBall: sanitizeSelection(parsed.goldenBall),
+      favoritePlayer: sanitizeSelection(parsed.favoritePlayer)
+    };
+  } catch {
+    return {};
+  }
+};
+
+const saveStoredPlayerPrediction = (
+  lobby: Lobby,
+  predictionId: PlayerPredictionId,
+  selection: PlayerPredictionSelection
+) => {
+  const predictions = {
+    ...getStoredPlayerPredictions(lobby),
+    [predictionId]: selection
+  };
+
+  window.localStorage.setItem(getPlayerPredictionsStorageKey(lobby), JSON.stringify(predictions));
+};
+
+const getPlayersForCountry = (country: string) =>
+  playerGuide
+    .filter((player) => player.country === country)
+    .sort((a, b) => a.number - b.number || a.name.localeCompare(b.name));
+
 const matchSpecificCustomFields: CustomNumericFieldId[] = [
   "exactScore",
   "resultGoalDifference",
@@ -1634,6 +1761,21 @@ const getParticipatingTeams = (language: Language) =>
 const sanitizeNonNegativeIntegerInput = (value: string) => value.replace(/\D/g, "").replace(/^0+(\d)/, "$1");
 
 const isNonNegativeIntegerValue = (value: string) => /^(0|[1-9]\d*)$/.test(value);
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+const normalizeSearchText = (value: string) =>
+  value
+    .toLocaleLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ø/g, "o");
 
 const isLobbyPasswordValid = (password: string) =>
   password.length >= 8 &&
@@ -2069,7 +2211,8 @@ const getGlobalPredictionOptions = (selectedCopy: Copy, lobby: Lobby): GlobalPre
     return fieldsByPointSystem[lobby.pointSystem].map((field) => ({
       id: field,
       label: selectedCopy.customSettingsPage.fields[field],
-      isPlacement: isGlobalPlacementPredictionId(field)
+      isPlacement: isGlobalPlacementPredictionId(field),
+      isPlayer: isPlayerPredictionId(field)
     }));
   }
 
@@ -2078,7 +2221,8 @@ const getGlobalPredictionOptions = (selectedCopy: Copy, lobby: Lobby): GlobalPre
     .map((field) => ({
       id: field,
       label: selectedCopy.customSettingsPage.fields[field],
-      isPlacement: isGlobalPlacementPredictionId(field)
+      isPlacement: isGlobalPlacementPredictionId(field),
+      isPlayer: isPlayerPredictionId(field)
     }));
 };
 
@@ -2090,14 +2234,16 @@ const renderGlobalPredictionOptionContent = (
   const selectedTeam = option.isPlacement
     ? getStoredGlobalPlacementPredictions(lobby)[option.id as GlobalPlacementPredictionId]
     : null;
+  const selectedPlayer = option.isPlayer ? getStoredPlayerPredictions(lobby)[option.id as PlayerPredictionId] : null;
 
-  if (!selectedTeam) {
+  if (!selectedTeam && !selectedPlayer) {
     return `<span>${option.label}</span>`;
   }
 
   return `
     <span>${option.label}</span>
-    ${renderTeamBadge(selectedTeam, language)}
+    ${selectedTeam ? renderTeamBadge(selectedTeam, language) : ""}
+    ${selectedPlayer ? `<span class="player-prediction-choice">#${selectedPlayer.number} ${escapeHtml(selectedPlayer.name)}</span>` : ""}
   `;
 };
 
@@ -2115,12 +2261,24 @@ const renderCustomFeatureButtons = (selectedCopy: Copy, language: Language, lobb
 
   return featureOptions
     .map((feature) => {
-      const selectedTeam = feature === "trackTeam" ? lobby.customSettings?.trackedTeam : null;
+      const selectedTeam =
+        feature === "trackTeam"
+          ? lobby.customSettings?.trackedTeam
+          : feature === "chooseTeam"
+            ? getStoredChooseTeam(lobby)
+            : null;
+      const selectedPlayer = feature === "favoritePlayer" ? getStoredPlayerPredictions(lobby).favoritePlayer : null;
 
       return `
-        <button class="secondary-action compact-secondary-action global-prediction-option" type="button">
+        <button
+          class="secondary-action compact-secondary-action global-prediction-option"
+          type="button"
+          ${feature === "chooseTeam" ? `data-choose-team-lobby="${lobby.code}"` : ""}
+          ${feature === "favoritePlayer" ? `data-player-prediction="favoritePlayer" data-player-prediction-lobby="${lobby.code}"` : ""}
+        >
           <span>${selectedCopy.customSettingsPage.features[feature].label}</span>
           ${selectedTeam ? renderTeamBadge(selectedTeam, language) : ""}
+          ${selectedPlayer ? `<span class="player-prediction-choice">#${selectedPlayer.number} ${escapeHtml(selectedPlayer.name)}</span>` : ""}
         </button>
       `;
     })
@@ -2145,6 +2303,7 @@ const renderGlobalPredictionsDropdown = (selectedCopy: Copy, language: Language,
                 class="secondary-action compact-secondary-action global-prediction-option"
                 type="button"
                 ${option.isPlacement ? `data-global-placement-prediction="${option.id}"` : ""}
+                ${option.isPlayer ? `data-player-prediction="${option.id}" data-player-prediction-lobby="${lobby.code}"` : ""}
               >
                 ${renderGlobalPredictionOptionContent(option, lobby, language)}
               </button>
@@ -2162,6 +2321,18 @@ const getGlobalPlacementPredictionLabel = (
 ) => {
   if (!predictionId) {
     return selectedCopy.lobbyPage.globalPredictions;
+  }
+
+  return selectedCopy.customSettingsPage.fields[predictionId];
+};
+
+const getPlayerPredictionLabel = (selectedCopy: Copy, predictionId: PlayerPredictionId | null) => {
+  if (!predictionId) {
+    return selectedCopy.lobbyPage.globalPredictions;
+  }
+
+  if (predictionId === "favoritePlayer") {
+    return selectedCopy.customSettingsPage.features.favoritePlayer.label;
   }
 
   return selectedCopy.customSettingsPage.fields[predictionId];
@@ -3327,6 +3498,218 @@ const renderTrackTeamModal = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const renderChooseTeamModal = (selectedCopy: Copy, language: Language) => {
+  if (!chooseTeamModal.isOpen || !chooseTeamModal.lobby) {
+    return "";
+  }
+
+  const teams = getParticipatingTeams(language);
+  const selectedTeam = teams.find((team) => team.team.en === chooseTeamModal.selectedTeam);
+  const searchQuery = chooseTeamModal.searchQuery.trim().toLocaleLowerCase();
+  const filteredTeams = teams.filter((team) => {
+    const searchableNames = [team.team.en, team.team.es].map((name) => name.toLocaleLowerCase());
+    return !searchQuery || searchableNames.some((name) => name.startsWith(searchQuery));
+  });
+
+  return `
+    <div class="modal-backdrop" role="presentation" id="choose-team-backdrop">
+      <section class="join-lobby-modal global-placement-modal" role="dialog" aria-modal="true" aria-labelledby="choose-team-title">
+        <div class="modal-header">
+          <h2 id="choose-team-title">${selectedCopy.customSettingsPage.features.chooseTeam.label}</h2>
+          <button class="modal-close" type="button" id="choose-team-close" aria-label="${selectedCopy.leaveLobby.cancel}">
+            &times;
+          </button>
+        </div>
+        <p class="leave-lobby-body choose-team-description">${selectedCopy.customSettingsPage.features.chooseTeam.detail}</p>
+        <div class="tracked-team-control global-placement-country-control">
+          <span>${selectedCopy.lobbyPage.chooseCountry}</span>
+          <button
+            class="tracked-team-trigger"
+            type="button"
+            id="choose-team-modal-trigger"
+            aria-expanded="${chooseTeamModal.isMenuOpen ? "true" : "false"}"
+          >
+            ${
+              selectedTeam
+                ? `<img src="${selectedTeam.flagSrc}" alt="${selectedTeam.flagAlt[language]}" /><span>${selectedTeam.team[language]}</span>`
+                : `<span>${selectedCopy.customSettingsPage.trackedTeamPlaceholder}</span>`
+            }
+          </button>
+          <div class="tracked-team-menu" id="choose-team-modal-menu" ${chooseTeamModal.isMenuOpen ? "" : "hidden"}>
+            <input
+              class="global-placement-search"
+              id="choose-team-search"
+              type="text"
+              autocomplete="off"
+              placeholder="${selectedCopy.lobbyPage.searchCountry}"
+              value="${chooseTeamModal.searchQuery}"
+            />
+            ${filteredTeams
+              .map(
+                (team) => `
+                  <button
+                    type="button"
+                    data-choose-team="${team.team.en}"
+                    data-choose-team-search="${team.team.en.toLocaleLowerCase()}|${team.team.es.toLocaleLowerCase()}"
+                  >
+                    <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
+                    <span>${team.team[language]}</span>
+                  </button>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="choose-team-cancel">
+            ${selectedCopy.leaveLobby.cancel}
+          </button>
+          <button class="primary-action" type="button" id="choose-team-confirm" ${chooseTeamModal.selectedTeam ? "" : "disabled"}>
+            ${selectedCopy.lobbyPage.confirmGlobalPrediction}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
+const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => {
+  if (!playerPredictionModal.isOpen || !playerPredictionModal.lobby || !playerPredictionModal.predictionId) {
+    return "";
+  }
+
+  const teams = getParticipatingTeams(language);
+  const selectedTeam = teams.find((team) => team.team.en === playerPredictionModal.selectedCountry);
+  const predictionLabel = getPlayerPredictionLabel(selectedCopy, playerPredictionModal.predictionId);
+  const countrySearchQuery = playerPredictionModal.countrySearchQuery.trim().toLocaleLowerCase();
+  const playerSearchQuery = normalizeSearchText(playerPredictionModal.playerSearchQuery.trim());
+  const players = playerPredictionModal.selectedCountry ? getPlayersForCountry(playerPredictionModal.selectedCountry) : [];
+  const selectedPlayer = players.find(
+    (player) =>
+      player.name === playerPredictionModal.selectedPlayerName &&
+      player.number === playerPredictionModal.selectedPlayerNumber
+  );
+  const filteredTeams = teams.filter((team) => {
+    const searchableNames = [team.team.en, team.team.es].map((name) => name.toLocaleLowerCase());
+    return !countrySearchQuery || searchableNames.some((name) => name.startsWith(countrySearchQuery));
+  });
+  const filteredPlayers = players.filter((player) => {
+    const searchableName = normalizeSearchText(player.name);
+    const searchableNameParts = searchableName.split(/\s+/);
+    const searchableNumber = String(player.number);
+    return (
+      !playerSearchQuery ||
+      searchableName.startsWith(playerSearchQuery) ||
+      searchableNameParts.some((namePart) => namePart.startsWith(playerSearchQuery)) ||
+      searchableNumber.startsWith(playerSearchQuery)
+    );
+  });
+
+  return `
+    <div class="modal-backdrop" role="presentation" id="player-prediction-backdrop">
+      <section class="join-lobby-modal global-placement-modal" role="dialog" aria-modal="true" aria-labelledby="player-prediction-title">
+        <div class="modal-header">
+          <h2 id="player-prediction-title">${predictionLabel}</h2>
+          <button class="modal-close" type="button" id="player-prediction-close" aria-label="${selectedCopy.leaveLobby.cancel}">
+            &times;
+          </button>
+        </div>
+        <p class="leave-lobby-body">${selectedCopy.lobbyPage.choosePlayerPrediction(predictionLabel)}</p>
+        <div class="tracked-team-control global-placement-country-control">
+          <span>${selectedCopy.lobbyPage.chooseCountry}</span>
+          <button
+            class="tracked-team-trigger"
+            type="button"
+            id="player-country-trigger"
+            aria-expanded="${playerPredictionModal.isCountryMenuOpen ? "true" : "false"}"
+          >
+            ${
+              selectedTeam
+                ? `<img src="${selectedTeam.flagSrc}" alt="${selectedTeam.flagAlt[language]}" /><span>${selectedTeam.team[language]}</span>`
+                : `<span>${selectedCopy.customSettingsPage.trackedTeamPlaceholder}</span>`
+            }
+          </button>
+          <div class="tracked-team-menu" id="player-country-menu" ${playerPredictionModal.isCountryMenuOpen ? "" : "hidden"}>
+            <input
+              class="global-placement-search"
+              id="player-country-search"
+              type="text"
+              autocomplete="off"
+              placeholder="${selectedCopy.lobbyPage.searchCountry}"
+              value="${playerPredictionModal.countrySearchQuery}"
+            />
+            ${filteredTeams
+              .map(
+                (team) => `
+                  <button
+                    type="button"
+                    data-player-country="${team.team.en}"
+                    data-player-country-search="${team.team.en.toLocaleLowerCase()}|${team.team.es.toLocaleLowerCase()}"
+                  >
+                    <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
+                    <span>${team.team[language]}</span>
+                  </button>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="tracked-team-control global-placement-country-control">
+          <span>${selectedCopy.lobbyPage.choosePlayer}</span>
+          <button
+            class="tracked-team-trigger"
+            type="button"
+            id="player-name-trigger"
+            aria-expanded="${playerPredictionModal.isPlayerMenuOpen ? "true" : "false"}"
+            ${playerPredictionModal.selectedCountry ? "" : "disabled"}
+          >
+            ${
+              selectedPlayer
+                ? `<span class="player-option-number">#${selectedPlayer.number}</span><span>${escapeHtml(selectedPlayer.name)}</span>`
+                : `<span>${selectedCopy.lobbyPage.choosePlayer}</span>`
+            }
+          </button>
+          <div class="tracked-team-menu" id="player-name-menu" ${playerPredictionModal.isPlayerMenuOpen ? "" : "hidden"}>
+            <input
+              class="global-placement-search"
+              id="player-name-search"
+              type="text"
+              autocomplete="off"
+              placeholder="${selectedCopy.lobbyPage.searchPlayer}"
+              value="${playerPredictionModal.playerSearchQuery}"
+            />
+            ${
+              filteredPlayers
+                .map(
+                  (player) => `
+                    <button
+                      type="button"
+                      data-player-name="${escapeHtml(player.name)}"
+                      data-player-number="${player.number}"
+                      data-player-search="${escapeHtml([normalizeSearchText(player.name), ...normalizeSearchText(player.name).split(/\s+/), String(player.number)].join("|"))}"
+                    >
+                      <span class="player-option-number">#${player.number}</span>
+                      <span>${escapeHtml(player.name)}</span>
+                    </button>
+                  `
+                )
+                .join("")
+            }
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="player-prediction-cancel">
+            ${selectedCopy.leaveLobby.cancel}
+          </button>
+          <button class="primary-action" type="button" id="player-prediction-confirm" ${selectedPlayer ? "" : "disabled"}>
+            ${selectedCopy.lobbyPage.confirmGlobalPrediction}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
 const renderStandings = (selectedCopy: Copy, language: Language) => {
   const standings = getComputedStandings();
 
@@ -3602,6 +3985,8 @@ const render = (language: Language) => {
   ${renderPredictionCopyModal(selectedCopy)}
   ${renderGlobalPlacementPredictionModal(selectedCopy, language)}
   ${renderTrackTeamModal(selectedCopy, language)}
+  ${renderChooseTeamModal(selectedCopy, language)}
+  ${renderPlayerPredictionModal(selectedCopy, language)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -3676,6 +4061,28 @@ const render = (language: Language) => {
   const trackTeamModalMenu = document.querySelector<HTMLDivElement>("#track-team-modal-menu");
   const trackTeamSearchInput = document.querySelector<HTMLInputElement>("#track-team-search");
   const trackTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-track-team]");
+  const chooseTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-choose-team-lobby]");
+  const chooseTeamBackdrop = document.querySelector<HTMLDivElement>("#choose-team-backdrop");
+  const chooseTeamCloseButton = document.querySelector<HTMLButtonElement>("#choose-team-close");
+  const chooseTeamCancelButton = document.querySelector<HTMLButtonElement>("#choose-team-cancel");
+  const chooseTeamConfirmButton = document.querySelector<HTMLButtonElement>("#choose-team-confirm");
+  const chooseTeamModalTrigger = document.querySelector<HTMLButtonElement>("#choose-team-modal-trigger");
+  const chooseTeamModalMenu = document.querySelector<HTMLDivElement>("#choose-team-modal-menu");
+  const chooseTeamSearchInput = document.querySelector<HTMLInputElement>("#choose-team-search");
+  const chooseTeamCountryButtons = document.querySelectorAll<HTMLButtonElement>("[data-choose-team]");
+  const playerPredictionButtons = document.querySelectorAll<HTMLButtonElement>("[data-player-prediction]");
+  const playerPredictionBackdrop = document.querySelector<HTMLDivElement>("#player-prediction-backdrop");
+  const playerPredictionCloseButton = document.querySelector<HTMLButtonElement>("#player-prediction-close");
+  const playerPredictionCancelButton = document.querySelector<HTMLButtonElement>("#player-prediction-cancel");
+  const playerPredictionConfirmButton = document.querySelector<HTMLButtonElement>("#player-prediction-confirm");
+  const playerCountryTrigger = document.querySelector<HTMLButtonElement>("#player-country-trigger");
+  const playerCountryMenu = document.querySelector<HTMLDivElement>("#player-country-menu");
+  const playerCountrySearchInput = document.querySelector<HTMLInputElement>("#player-country-search");
+  const playerCountryButtons = document.querySelectorAll<HTMLButtonElement>("[data-player-country]");
+  const playerNameTrigger = document.querySelector<HTMLButtonElement>("#player-name-trigger");
+  const playerNameMenu = document.querySelector<HTMLDivElement>("#player-name-menu");
+  const playerNameSearchInput = document.querySelector<HTMLInputElement>("#player-name-search");
+  const playerNameButtons = document.querySelectorAll<HTMLButtonElement>("[data-player-name]");
   const customSettingsSaveButton = document.querySelector<HTMLButtonElement>("#custom-settings-save");
 
   const closeLanguageMenu = () => {
@@ -4193,6 +4600,308 @@ const render = (language: Language) => {
         trackTeamModal = {
           ...trackTeamModal,
           isMenuOpen: false
+        };
+        render(getStoredLanguage());
+      },
+      { once: true }
+    );
+  }
+
+  const closeChooseTeamModal = () => {
+    chooseTeamModal = {
+      isOpen: false,
+      lobby: null,
+      selectedTeam: "",
+      isMenuOpen: false,
+      searchQuery: ""
+    };
+    render(getStoredLanguage());
+  };
+
+  chooseTeamButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const lobby = currentLobby?.code === button.dataset.chooseTeamLobby ? currentLobby : null;
+
+      if (!lobby) {
+        return;
+      }
+
+      chooseTeamModal = {
+        isOpen: true,
+        lobby,
+        selectedTeam: getStoredChooseTeam(lobby),
+        isMenuOpen: false,
+        searchQuery: ""
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  chooseTeamCloseButton?.addEventListener("click", closeChooseTeamModal);
+  chooseTeamCancelButton?.addEventListener("click", closeChooseTeamModal);
+  chooseTeamBackdrop?.addEventListener("click", (event) => {
+    if (event.target === chooseTeamBackdrop) {
+      closeChooseTeamModal();
+    }
+  });
+
+  chooseTeamModalTrigger?.addEventListener("click", () => {
+    const isOpening = !chooseTeamModal.isMenuOpen;
+    chooseTeamModal = {
+      ...chooseTeamModal,
+      isMenuOpen: isOpening,
+      searchQuery: isOpening ? "" : chooseTeamModal.searchQuery
+    };
+    render(getStoredLanguage());
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>("#choose-team-search")?.focus();
+    }, 0);
+  });
+
+  chooseTeamModalTrigger?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  chooseTeamModalMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  chooseTeamSearchInput?.addEventListener("input", () => {
+    const query = chooseTeamSearchInput.value.trim().toLocaleLowerCase();
+    chooseTeamModal = {
+      ...chooseTeamModal,
+      searchQuery: chooseTeamSearchInput.value
+    };
+    chooseTeamCountryButtons.forEach((button) => {
+      const searchableNames = (button.dataset.chooseTeamSearch ?? "").split("|");
+      button.hidden = Boolean(query) && !searchableNames.some((name) => name.startsWith(query));
+    });
+  });
+
+  chooseTeamCountryButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      chooseTeamModal = {
+        ...chooseTeamModal,
+        selectedTeam: button.dataset.chooseTeam ?? "",
+        isMenuOpen: false,
+        searchQuery: ""
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  chooseTeamConfirmButton?.addEventListener("click", () => {
+    if (!chooseTeamModal.lobby || !chooseTeamModal.selectedTeam) {
+      return;
+    }
+
+    saveStoredChooseTeam(chooseTeamModal.lobby, chooseTeamModal.selectedTeam);
+    closeChooseTeamModal();
+  });
+
+  if (chooseTeamModal.isMenuOpen) {
+    document.addEventListener(
+      "click",
+      () => {
+        chooseTeamModal = {
+          ...chooseTeamModal,
+          isMenuOpen: false
+        };
+        render(getStoredLanguage());
+      },
+      { once: true }
+    );
+  }
+
+  const closePlayerPredictionModal = () => {
+    playerPredictionModal = {
+      isOpen: false,
+      lobby: null,
+      predictionId: null,
+      selectedCountry: "",
+      selectedPlayerName: "",
+      selectedPlayerNumber: null,
+      isCountryMenuOpen: false,
+      isPlayerMenuOpen: false,
+      countrySearchQuery: "",
+      playerSearchQuery: ""
+    };
+    render(getStoredLanguage());
+  };
+
+  playerPredictionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const predictionId = button.dataset.playerPrediction as PlayerPredictionId | undefined;
+      const lobbyCode = button.dataset.playerPredictionLobby;
+      const lobby =
+        currentLobby?.code === lobbyCode
+          ? currentLobby
+          : userLobbies.find((candidate) => candidate.code === lobbyCode) ?? null;
+
+      if (!predictionId || !isPlayerPredictionId(predictionId) || !lobby) {
+        return;
+      }
+
+      const storedPrediction = getStoredPlayerPredictions(lobby)[predictionId];
+
+      playerPredictionModal = {
+        isOpen: true,
+        lobby,
+        predictionId,
+        selectedCountry: storedPrediction?.country ?? "",
+        selectedPlayerName: storedPrediction?.name ?? "",
+        selectedPlayerNumber: storedPrediction?.number ?? null,
+        isCountryMenuOpen: false,
+        isPlayerMenuOpen: false,
+        countrySearchQuery: "",
+        playerSearchQuery: ""
+      };
+
+      render(getStoredLanguage());
+    });
+  });
+
+  playerPredictionCloseButton?.addEventListener("click", closePlayerPredictionModal);
+  playerPredictionCancelButton?.addEventListener("click", closePlayerPredictionModal);
+  playerPredictionBackdrop?.addEventListener("click", (event) => {
+    if (event.target === playerPredictionBackdrop) {
+      closePlayerPredictionModal();
+    }
+  });
+
+  playerCountryTrigger?.addEventListener("click", () => {
+    const isOpening = !playerPredictionModal.isCountryMenuOpen;
+    playerPredictionModal = {
+      ...playerPredictionModal,
+      isCountryMenuOpen: isOpening,
+      isPlayerMenuOpen: false,
+      countrySearchQuery: isOpening ? "" : playerPredictionModal.countrySearchQuery
+    };
+    render(getStoredLanguage());
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>("#player-country-search")?.focus();
+    }, 0);
+  });
+
+  playerCountryTrigger?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  playerCountryMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  playerCountrySearchInput?.addEventListener("input", () => {
+    const query = playerCountrySearchInput.value.trim().toLocaleLowerCase();
+    playerPredictionModal = {
+      ...playerPredictionModal,
+      countrySearchQuery: playerCountrySearchInput.value
+    };
+
+    playerCountryButtons.forEach((button) => {
+      const searchableNames = (button.dataset.playerCountrySearch ?? "").split("|");
+      button.hidden = Boolean(query) && !searchableNames.some((name) => name.startsWith(query));
+    });
+  });
+
+  playerCountryButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const selectedCountry = button.dataset.playerCountry ?? "";
+      playerPredictionModal = {
+        ...playerPredictionModal,
+        selectedCountry,
+        selectedPlayerName: "",
+        selectedPlayerNumber: null,
+        isCountryMenuOpen: false,
+        isPlayerMenuOpen: false,
+        countrySearchQuery: "",
+        playerSearchQuery: ""
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  playerNameTrigger?.addEventListener("click", () => {
+    if (!playerPredictionModal.selectedCountry) {
+      return;
+    }
+
+    const isOpening = !playerPredictionModal.isPlayerMenuOpen;
+    playerPredictionModal = {
+      ...playerPredictionModal,
+      isCountryMenuOpen: false,
+      isPlayerMenuOpen: isOpening,
+      playerSearchQuery: isOpening ? "" : playerPredictionModal.playerSearchQuery
+    };
+    render(getStoredLanguage());
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>("#player-name-search")?.focus();
+    }, 0);
+  });
+
+  playerNameTrigger?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  playerNameMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  playerNameSearchInput?.addEventListener("input", () => {
+    const query = normalizeSearchText(playerNameSearchInput.value.trim());
+    playerPredictionModal = {
+      ...playerPredictionModal,
+      playerSearchQuery: playerNameSearchInput.value
+    };
+
+    playerNameButtons.forEach((button) => {
+      const searchableValues = (button.dataset.playerSearch ?? "").split("|");
+      button.hidden = Boolean(query) && !searchableValues.some((value) => value.startsWith(query));
+    });
+  });
+
+  playerNameButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const selectedPlayerNumber = Number(button.dataset.playerNumber);
+
+      playerPredictionModal = {
+        ...playerPredictionModal,
+        selectedPlayerName: button.dataset.playerName ?? "",
+        selectedPlayerNumber: Number.isFinite(selectedPlayerNumber) ? selectedPlayerNumber : null,
+        isPlayerMenuOpen: false,
+        playerSearchQuery: ""
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  playerPredictionConfirmButton?.addEventListener("click", () => {
+    if (
+      !playerPredictionModal.lobby ||
+      !playerPredictionModal.predictionId ||
+      !playerPredictionModal.selectedCountry ||
+      !playerPredictionModal.selectedPlayerName ||
+      playerPredictionModal.selectedPlayerNumber === null
+    ) {
+      return;
+    }
+
+    saveStoredPlayerPrediction(playerPredictionModal.lobby, playerPredictionModal.predictionId, {
+      country: playerPredictionModal.selectedCountry,
+      name: playerPredictionModal.selectedPlayerName,
+      number: playerPredictionModal.selectedPlayerNumber
+    });
+    closePlayerPredictionModal();
+  });
+
+  if (playerPredictionModal.isCountryMenuOpen || playerPredictionModal.isPlayerMenuOpen) {
+    document.addEventListener(
+      "click",
+      () => {
+        playerPredictionModal = {
+          ...playerPredictionModal,
+          isCountryMenuOpen: false,
+          isPlayerMenuOpen: false
         };
         render(getStoredLanguage());
       },
