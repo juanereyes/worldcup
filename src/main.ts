@@ -2101,6 +2101,32 @@ const renderGlobalPredictionOptionContent = (
   `;
 };
 
+const renderCustomFeatureButtons = (selectedCopy: Copy, language: Language, lobby: Lobby) => {
+  if (lobby.pointSystem !== "custom") {
+    return "";
+  }
+
+  const featureOptions = (["chooseTeam", "trackTeam", "favoritePlayer", "bracketHeavy"] as CustomFeatureId[])
+    .filter((feature) => isCustomFeatureEnabled(lobby, feature));
+
+  if (featureOptions.length === 0) {
+    return "";
+  }
+
+  return featureOptions
+    .map((feature) => {
+      const selectedTeam = feature === "trackTeam" ? lobby.customSettings?.trackedTeam : null;
+
+      return `
+        <button class="secondary-action compact-secondary-action global-prediction-option" type="button">
+          <span>${selectedCopy.customSettingsPage.features[feature].label}</span>
+          ${selectedTeam ? renderTeamBadge(selectedTeam, language) : ""}
+        </button>
+      `;
+    })
+    .join("");
+};
+
 const renderGlobalPredictionsDropdown = (selectedCopy: Copy, language: Language, lobby: Lobby) => {
   const globalPredictionOptions = getGlobalPredictionOptions(selectedCopy, lobby);
 
@@ -2609,6 +2635,7 @@ const renderLobbyPage = (selectedCopy: Copy, language: Language) => {
                               ${selectedCopy.lobbyPage.myPredictions}
                             </a>
                             ${renderGlobalPredictionsDropdown(selectedCopy, language, currentLobby)}
+                            ${renderCustomFeatureButtons(selectedCopy, language, currentLobby)}
                             <button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>
                             ${
                               isAdmin
