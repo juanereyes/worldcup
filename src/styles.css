@@ -1133,11 +1133,39 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 
 .lobby-action-panel .secondary-action,
 .lobby-action-panel .leave-lobby-button,
-.lobby-action-panel .danger-action {
+.lobby-action-panel .danger-action,
+.lobby-global-dropdown {
   justify-content: center;
   min-height: 40px;
   text-align: center;
   width: 100%;
+}
+
+.lobby-global-dropdown {
+  position: relative;
+}
+
+.lobby-global-dropdown summary {
+  list-style: none;
+}
+
+.lobby-global-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.lobby-global-dropdown-menu {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(24, 42, 34, 0.12);
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+}
+
+.lobby-global-dropdown-menu .secondary-action {
+  min-height: 38px;
 }
 
 .lobby-member-list {

@@ -274,6 +274,7 @@ type Copy = {
     deleteLobby: string;
     showRules: string;
     myPredictions: string;
+    globalPredictions: string;
     closeRules: string;
     rulesTitle: string;
     pointSystem: string;
@@ -834,6 +835,7 @@ const copy: Record<Language, Copy> = {
       deleteLobby: "Delete lobby",
       showRules: "View rules",
       myPredictions: "My predictions",
+      globalPredictions: "Global predictions",
       closeRules: "Close rules",
       rulesTitle: "Lobby rules",
       pointSystem: "Point system",
@@ -1161,6 +1163,7 @@ const copy: Record<Language, Copy> = {
       deleteLobby: "Eliminar lobby",
       showRules: "Ver reglas",
       myPredictions: "Mis pronósticos",
+      globalPredictions: "Pronósticos globales",
       closeRules: "Cerrar reglas",
       rulesTitle: "Reglas del lobby",
       pointSystem: "Sistema de puntos",
@@ -1963,6 +1966,68 @@ const renderLobbyRulesPanel = (selectedCopy: Copy, language: Language, lobby: Lo
   `;
 };
 
+const getGlobalPredictionButtons = (selectedCopy: Copy, lobby: Lobby) => {
+  const selectedPointSystemOption = selectedCopy.pointSystemPage.options.find((option) => option.id === lobby.pointSystem);
+
+  if (!lobby.pointSystem || !selectedPointSystemOption) {
+    return [];
+  }
+
+  if (lobby.pointSystem !== "custom") {
+    const globalSection = selectedPointSystemOption.sections.find((section) => section.title === "Global");
+
+    return (
+      globalSection?.items.map((item) => {
+        const equalsIndex = item.indexOf("=");
+        return equalsIndex === -1 ? item : item.slice(0, equalsIndex).trim();
+      }) ?? []
+    );
+  }
+
+  const globalButtons = globalCustomFields
+    .filter((field) => isCustomRuleEnabled(lobby, field))
+    .map((field) => selectedCopy.customSettingsPage.fields[field]);
+
+  if (isCustomFeatureEnabled(lobby, "chooseTeam")) {
+    globalButtons.push(selectedCopy.customSettingsPage.features.chooseTeam.label);
+  }
+
+  if (isCustomFeatureEnabled(lobby, "trackTeam")) {
+    globalButtons.push(selectedCopy.customSettingsPage.features.trackTeam.label);
+  }
+
+  if (isCustomFeatureEnabled(lobby, "favoritePlayer")) {
+    globalButtons.push(selectedCopy.customSettingsPage.features.favoritePlayer.label);
+  }
+
+  return globalButtons;
+};
+
+const renderGlobalPredictionsDropdown = (selectedCopy: Copy, lobby: Lobby) => {
+  const globalPredictionButtons = getGlobalPredictionButtons(selectedCopy, lobby);
+
+  if (globalPredictionButtons.length === 0) {
+    return "";
+  }
+
+  return `
+    <details class="lobby-global-dropdown">
+      <summary class="secondary-action compact-secondary-action">${selectedCopy.lobbyPage.globalPredictions}</summary>
+      <div class="lobby-global-dropdown-menu">
+        ${globalPredictionButtons
+          .map(
+            (label) => `
+              <button class="secondary-action compact-secondary-action" type="button">
+                ${label}
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+    </details>
+  `;
+};
+
 const renderMatchListItem = (match: CarouselMatch, selectedCopy: Copy, language: Language) => {
   const hasScore = match.score.home !== null && match.score.away !== null;
   const status = getMatchStatusLabel(match.status, selectedCopy);
@@ -2430,6 +2495,7 @@ const renderLobbyPage = (selectedCopy: Copy, language: Language) => {
                             <a class="secondary-action compact-secondary-action" href="/predictions.html?lobby=${encodeURIComponent(currentLobby.code)}">
                               ${selectedCopy.lobbyPage.myPredictions}
                             </a>
+                            ${renderGlobalPredictionsDropdown(selectedCopy, currentLobby)}
                             <button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>
                             ${
                               isAdmin
