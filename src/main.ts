@@ -209,6 +209,15 @@ type PlayerPredictionSelection = {
   number: number;
 };
 
+type BracketHeavySide = "left" | "right" | "center";
+
+type BracketHeavyMatch = {
+  key: string;
+  stage: string;
+  teams: Array<string | null>;
+  teamSlots?: Array<string | null>;
+};
+
 type GlobalPredictionOption = {
   id: CustomNumericFieldId;
   label: string;
@@ -556,6 +565,7 @@ let lobbyError: string | null = null;
 let userLobbiesError: string | null = null;
 let predictionsError: string | null = null;
 let areLobbyRulesVisible = false;
+let isBracketHeavyVisible = false;
 let selectedPointSystem: PointSystemId | null = null;
 let selectedPointSystemLobbyCode: string | null = null;
 let pointSystemSetupError: string | null = null;
@@ -1627,6 +1637,8 @@ const getChooseTeamStorageKey = (lobby: Lobby) =>
   `worldcup-choose-team-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
 const getPlayerPredictionsStorageKey = (lobby: Lobby) =>
   `worldcup-player-predictions-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
+const getBracketHeavySelectionsStorageKey = (lobby: Lobby) =>
+  `worldcup-bracket-heavy-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
 
 const getStoredGlobalPlacementPredictions = (lobby: Lobby): Partial<Record<GlobalPlacementPredictionId, string>> => {
   const storedPredictions = window.localStorage.getItem(getGlobalPlacementPredictionsStorageKey(lobby));
@@ -1726,6 +1738,28 @@ const getPlayersForCountry = (country: string) =>
   playerGuide
     .filter((player) => player.country === country)
     .sort((a, b) => a.number - b.number || a.name.localeCompare(b.name));
+
+const getStoredBracketHeavySelections = (lobby: Lobby): Record<string, string> => {
+  const storedSelections = window.localStorage.getItem(getBracketHeavySelectionsStorageKey(lobby));
+
+  if (!storedSelections) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(storedSelections) as Record<string, unknown>;
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+  } catch {
+    return {};
+  }
+};
+
+const saveStoredBracketHeavySelections = (lobby: Lobby, selections: Record<string, string>) => {
+  window.localStorage.setItem(getBracketHeavySelectionsStorageKey(lobby), JSON.stringify(selections));
+};
 
 const matchSpecificCustomFields: CustomNumericFieldId[] = [
   "exactScore",
@@ -2275,6 +2309,7 @@ const renderCustomFeatureButtons = (selectedCopy: Copy, language: Language, lobb
           type="button"
           ${feature === "chooseTeam" ? `data-choose-team-lobby="${lobby.code}"` : ""}
           ${feature === "favoritePlayer" ? `data-player-prediction="favoritePlayer" data-player-prediction-lobby="${lobby.code}"` : ""}
+          ${feature === "bracketHeavy" ? `data-bracket-heavy-lobby="${lobby.code}"` : ""}
         >
           <span>${selectedCopy.customSettingsPage.features[feature].label}</span>
           ${selectedTeam ? renderTeamBadge(selectedTeam, language) : ""}
@@ -2718,6 +2753,273 @@ const renderBracketPage = (selectedCopy: Copy, language: Language) => {
               `
       }
     </section>
+  `;
+};
+
+const bracketHeavySideStages = ["Last 32", "Last 16", "Quarter Finals", "Semi Finals"] as const;
+const bracketHeavyRoundSizes: Record<(typeof bracketHeavySideStages)[number], number> = {
+  "Last 32": 8,
+  "Last 16": 4,
+  "Quarter Finals": 2,
+  "Semi Finals": 1
+};
+
+const getBracketHeavyMatchKey = (stage: string, side: BracketHeavySide, index: number) =>
+  `${stage}:${side}:${index}`;
+
+const getBracketHeavyTeamSlot = (match: BracketHeavyMatch, teamIndex: number) =>
+  match.teamSlots?.[teamIndex] ?? match.teams[teamIndex] ?? null;
+
+const getBracketHeavySelectedSlot = (match: BracketHeavyMatch, selections: Record<string, string>) => {
+  const selectedSlot = selections[match.key];
+
+  return match.teams.some((_, index) => selectedSlot === getBracketHeavyTeamSlot(match, index))
+    ? selectedSlot
+    : null;
+};
+
+const getBracketHeavySelectedIndex = (match: BracketHeavyMatch, selections: Record<string, string>) => {
+  const selectedSlot = getBracketHeavySelectedSlot(match, selections);
+
+  return match.teams.findIndex((_, index) => selectedSlot === getBracketHeavyTeamSlot(match, index));
+};
+
+const getBracketHeavySelectedTeam = (match: BracketHeavyMatch, selections: Record<string, string>) => {
+  const selectedIndex = getBracketHeavySelectedIndex(match, selections);
+
+  return selectedIndex >= 0 ? match.teams[selectedIndex] : null;
+};
+
+const getBracketHeavyLoserEntry = (match: BracketHeavyMatch, selections: Record<string, string>) => {
+  const selectedIndex = getBracketHeavySelectedIndex(match, selections);
+
+  if (selectedIndex < 0) {
+    return null;
+  }
+
+  const loserIndex = selectedIndex === 0 ? 1 : 0;
+  const team = match.teams[loserIndex];
+  const slot = getBracketHeavyTeamSlot(match, loserIndex);
+
+  return team && slot ? { team, slot } : null;
+};
+
+const getBracketHeavyStageMatches = (stage: string, side: "left" | "right" | "center") => {
+  const matches = getKnockoutMatches().filter((match) => match.stage === stage);
+
+  if (side === "center") {
+    return matches;
+  }
+
+  const splitIndex = Math.ceil(matches.length / 2);
+
+  return side === "left" ? matches.slice(0, splitIndex) : matches.slice(splitIndex);
+};
+
+const getBracketHeavySideMatches = (side: "left" | "right", selections: Record<string, string>) => {
+  const rounds = {} as Record<(typeof bracketHeavySideStages)[number], BracketHeavyMatch[]>;
+
+  rounds["Last 32"] = getBracketHeavyStageMatches("Last 32", side).map((match, index) => ({
+    key: getBracketHeavyMatchKey("Last 32", side, index),
+    stage: "Last 32",
+    teams: [match.homeTeam, match.awayTeam],
+    teamSlots: ["home", "away"]
+  }));
+
+  bracketHeavySideStages.slice(1).forEach((stage, stageIndex) => {
+    const previousStage = bracketHeavySideStages[stageIndex];
+    const previousMatches = rounds[previousStage];
+    const matchCount = bracketHeavyRoundSizes[stage];
+
+    rounds[stage] = Array.from({ length: matchCount }, (_, index) => {
+      const firstSource = previousMatches[index * 2];
+      const secondSource = previousMatches[index * 2 + 1];
+
+      return {
+        key: getBracketHeavyMatchKey(stage, side, index),
+        stage,
+        teams: [
+          firstSource ? getBracketHeavySelectedTeam(firstSource, selections) : null,
+          secondSource ? getBracketHeavySelectedTeam(secondSource, selections) : null
+        ],
+        teamSlots: [firstSource?.key ?? null, secondSource?.key ?? null]
+      };
+    });
+  });
+
+  return rounds;
+};
+
+const getBracketHeavyCenterMatches = (selections: Record<string, string>) => {
+  const leftRounds = getBracketHeavySideMatches("left", selections);
+  const rightRounds = getBracketHeavySideMatches("right", selections);
+  const leftSemi = leftRounds["Semi Finals"][0];
+  const rightSemi = rightRounds["Semi Finals"][0];
+  const leftSemiLoser = leftSemi ? getBracketHeavyLoserEntry(leftSemi, selections) : null;
+  const rightSemiLoser = rightSemi ? getBracketHeavyLoserEntry(rightSemi, selections) : null;
+
+  return {
+    final: [
+      {
+        key: getBracketHeavyMatchKey("Final", "center", 0),
+        stage: "Final",
+        teams: [
+          leftSemi ? getBracketHeavySelectedTeam(leftSemi, selections) : null,
+          rightSemi ? getBracketHeavySelectedTeam(rightSemi, selections) : null
+        ],
+        teamSlots: [leftSemi?.key ?? null, rightSemi?.key ?? null]
+      }
+    ],
+    thirdPlace: [
+      {
+        key: getBracketHeavyMatchKey("Third Place", "center", 0),
+        stage: "Third Place",
+        teams: [
+          leftSemiLoser?.team ?? null,
+          rightSemiLoser?.team ?? null
+        ],
+        teamSlots: [leftSemiLoser?.slot ?? null, rightSemiLoser?.slot ?? null]
+      }
+    ]
+  };
+};
+
+const getValidBracketHeavySelections = (selections: Record<string, string>) => {
+  const validSelections: Record<string, string> = {};
+  const leftRounds = getBracketHeavySideMatches("left", selections);
+  const rightRounds = getBracketHeavySideMatches("right", selections);
+  const centerMatches = getBracketHeavyCenterMatches(selections);
+  const allMatches = [
+    ...bracketHeavySideStages.flatMap((stage) => leftRounds[stage]),
+    ...bracketHeavySideStages.flatMap((stage) => rightRounds[stage]),
+    ...centerMatches.final,
+    ...centerMatches.thirdPlace
+  ];
+
+  allMatches.forEach((match) => {
+    const selectedSlot = getBracketHeavySelectedSlot(match, selections);
+
+    if (selectedSlot) {
+      validSelections[match.key] = selectedSlot;
+    }
+  });
+
+  return validSelections;
+};
+
+const renderBracketHeavyTeam = (
+  match: BracketHeavyMatch,
+  teamName: string | null,
+  teamIndex: number,
+  language: Language,
+  selections: Record<string, string>
+) => {
+  const teamSlot = getBracketHeavyTeamSlot(match, teamIndex);
+  const isSelectable = Boolean(teamName && teamSlot);
+  const isSelected = Boolean(isSelectable && selections[match.key] === teamSlot);
+
+  return `
+    <button
+      class="bracket-heavy-team${isSelected ? " is-selected" : ""}"
+      type="button"
+      ${isSelectable ? `data-bracket-heavy-match="${match.key}" data-bracket-heavy-team="${teamSlot}"` : "disabled"}
+    >
+      ${teamName ? renderTeamBadge(teamName, language) : `<span class="match-team-code" aria-hidden="true">TBD</span>`}
+      <span>${teamName ? getTeamDisplayName(teamName, language) : "TBD"}</span>
+    </button>
+  `;
+};
+
+const renderBracketHeavyMatch = (
+  match: BracketHeavyMatch,
+  language: Language,
+  selections: Record<string, string>
+) => `
+  <article class="bracket-heavy-match">
+    ${renderBracketHeavyTeam(match, match.teams[0], 0, language, selections)}
+    ${renderBracketHeavyTeam(match, match.teams[1], 1, language, selections)}
+  </article>
+`;
+
+const getBracketHeavyRoundClass = (stage: string) => stage.toLowerCase().replace(/\s+/g, "-");
+
+const renderBracketHeavySide = (language: Language, side: "left" | "right", selections: Record<string, string>) => {
+  const stages = side === "left" ? bracketHeavySideStages : [...bracketHeavySideStages].reverse();
+  const rounds = getBracketHeavySideMatches(side, selections);
+
+  return `
+    <div class="bracket-heavy-side bracket-heavy-side-${side}">
+      ${stages
+        .map((stage) => {
+          const matches = rounds[stage];
+
+          return `
+            <section class="bracket-heavy-round bracket-heavy-round-${getBracketHeavyRoundClass(stage)}" aria-label="${localizeStageLabel(stage, language)}">
+              <h3>${localizeStageLabel(stage, language)}</h3>
+              <div class="bracket-heavy-round-matches">
+                ${matches.map((match) => renderBracketHeavyMatch(match, language, selections)).join("")}
+              </div>
+            </section>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+};
+
+const renderBracketHeavyCenter = (language: Language, selections: Record<string, string>) => {
+  const centerMatches = getBracketHeavyCenterMatches(selections);
+
+  return `
+    <div class="bracket-heavy-center">
+      <section class="bracket-heavy-round bracket-heavy-final-round" aria-label="${localizeStageLabel("Final", language)}">
+        <h3>${localizeStageLabel("Final", language)}</h3>
+        <div class="bracket-heavy-round-matches">
+          ${centerMatches.final.map((match) => renderBracketHeavyMatch(match, language, selections)).join("")}
+        </div>
+      </section>
+      <section class="bracket-heavy-round bracket-heavy-third-round" aria-label="${localizeStageLabel("Third Place", language)}">
+        <h3>${localizeStageLabel("Third Place", language)}</h3>
+        <div class="bracket-heavy-round-matches">
+          ${centerMatches.thirdPlace.map((match) => renderBracketHeavyMatch(match, language, selections)).join("")}
+        </div>
+      </section>
+    </div>
+  `;
+};
+
+const renderBracketHeavyModal = (selectedCopy: Copy, language: Language) => {
+  if (!isBracketHeavyVisible || !currentLobby) {
+    return "";
+  }
+
+  const hasKnockoutMatches = getKnockoutMatches().length > 0;
+  const selections = getStoredBracketHeavySelections(currentLobby);
+
+  return `
+    <div class="modal-backdrop bracket-heavy-backdrop" role="presentation" id="bracket-heavy-backdrop">
+      <section class="join-lobby-modal bracket-heavy-modal" role="dialog" aria-modal="true" aria-labelledby="bracket-heavy-title">
+        <div class="modal-header">
+          <h2 id="bracket-heavy-title">${selectedCopy.customSettingsPage.features.bracketHeavy.label}</h2>
+          <button class="modal-close" type="button" id="bracket-heavy-close" aria-label="${selectedCopy.leaveLobby.cancel}">
+            &times;
+          </button>
+        </div>
+        ${
+          isAllMatchesLoading
+            ? `<div class="matches-state">${selectedCopy.bracketPage.loading}</div>`
+            : allMatchesError
+              ? `<div class="matches-state">${selectedCopy.bracketPage.error}</div>`
+              : !hasKnockoutMatches
+                ? `<div class="matches-state">${selectedCopy.bracketPage.empty}</div>`
+                : `<div class="bracket-heavy-board">
+                    ${renderBracketHeavySide(language, "left", selections)}
+                    ${renderBracketHeavyCenter(language, selections)}
+                    ${renderBracketHeavySide(language, "right", selections)}
+                  </div>`
+        }
+      </section>
+    </div>
   `;
 };
 
@@ -3987,6 +4289,7 @@ const render = (language: Language) => {
   ${renderTrackTeamModal(selectedCopy, language)}
   ${renderChooseTeamModal(selectedCopy, language)}
   ${renderPlayerPredictionModal(selectedCopy, language)}
+  ${renderBracketHeavyModal(selectedCopy, language)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -4083,6 +4386,10 @@ const render = (language: Language) => {
   const playerNameMenu = document.querySelector<HTMLDivElement>("#player-name-menu");
   const playerNameSearchInput = document.querySelector<HTMLInputElement>("#player-name-search");
   const playerNameButtons = document.querySelectorAll<HTMLButtonElement>("[data-player-name]");
+  const bracketHeavyButtons = document.querySelectorAll<HTMLButtonElement>("[data-bracket-heavy-lobby]");
+  const bracketHeavyTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-bracket-heavy-match]");
+  const bracketHeavyBackdrop = document.querySelector<HTMLDivElement>("#bracket-heavy-backdrop");
+  const bracketHeavyCloseButton = document.querySelector<HTMLButtonElement>("#bracket-heavy-close");
   const customSettingsSaveButton = document.querySelector<HTMLButtonElement>("#custom-settings-save");
 
   const closeLanguageMenu = () => {
@@ -4908,6 +5215,60 @@ const render = (language: Language) => {
       { once: true }
     );
   }
+
+  const closeBracketHeavyModal = () => {
+    isBracketHeavyVisible = false;
+    render(getStoredLanguage());
+  };
+
+  bracketHeavyButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const lobby = currentLobby?.code === button.dataset.bracketHeavyLobby ? currentLobby : null;
+
+      if (!lobby) {
+        return;
+      }
+
+      isBracketHeavyVisible = true;
+      render(getStoredLanguage());
+    });
+  });
+
+  bracketHeavyCloseButton?.addEventListener("click", closeBracketHeavyModal);
+  bracketHeavyBackdrop?.addEventListener("click", (event) => {
+    if (event.target === bracketHeavyBackdrop) {
+      closeBracketHeavyModal();
+    }
+  });
+
+  bracketHeavyTeamButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!currentLobby) {
+        return;
+      }
+
+      const matchKey = button.dataset.bracketHeavyMatch;
+      const teamName = button.dataset.bracketHeavyTeam;
+
+      if (!matchKey || !teamName) {
+        return;
+      }
+
+      const selections = getStoredBracketHeavySelections(currentLobby);
+      const nextSelections = {
+        ...selections
+      };
+
+      if (nextSelections[matchKey] === teamName) {
+        delete nextSelections[matchKey];
+      } else {
+        nextSelections[matchKey] = teamName;
+      }
+
+      saveStoredBracketHeavySelections(currentLobby, getValidBracketHeavySelections(nextSelections));
+      render(getStoredLanguage());
+    });
+  });
 
   customSettingsSaveButton?.addEventListener("click", () => {
     void saveCustomSettings(selectedCopy);
@@ -5847,7 +6208,13 @@ const loadCarouselMatches = async () => {
 const loadAllMatches = async () => {
   const currentPage = getCurrentPage();
 
-  if (currentPage !== "matches" && currentPage !== "groups" && currentPage !== "bracket" && currentPage !== "predictions") {
+  if (
+    currentPage !== "matches" &&
+    currentPage !== "groups" &&
+    currentPage !== "bracket" &&
+    currentPage !== "predictions" &&
+    currentPage !== "lobby"
+  ) {
     return;
   }
 
