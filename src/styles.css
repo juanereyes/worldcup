@@ -1619,9 +1619,26 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   width: 100%;
 }
 
+.tracked-team-menu button[hidden] {
+  display: none;
+}
+
+.global-placement-search {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--green-dark);
+  font: inherit;
+  font-weight: 800;
+  margin-bottom: 4px;
+  min-height: 40px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
 .tracked-team-menu button:hover,
 .tracked-team-menu button:focus-visible,
 .tracked-team-trigger:focus-visible,
+.global-placement-search:focus-visible,
 .custom-setting-input:focus-visible {
   border-color: #c7d1c5;
   box-shadow: 0 0 0 3px rgba(15, 107, 79, 0.12);

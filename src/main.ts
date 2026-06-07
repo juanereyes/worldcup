@@ -212,6 +212,14 @@ type GlobalPlacementPredictionModalState = {
   predictionId: GlobalPlacementPredictionId | null;
   selectedTeam: string;
   isMenuOpen: boolean;
+  searchQuery: string;
+};
+
+type TrackTeamModalState = {
+  isOpen: boolean;
+  selectedTeam: string;
+  isMenuOpen: boolean;
+  searchQuery: string;
 };
 
 type Copy = {
@@ -292,6 +300,7 @@ type Copy = {
     globalPredictions: string;
     chooseGlobalPrediction: (prediction: string) => string;
     chooseCountry: string;
+    searchCountry: string;
     confirmGlobalPrediction: string;
     closeRules: string;
     rulesTitle: string;
@@ -526,7 +535,12 @@ let customSettingsState: CustomSettingsState = {
   message: null,
   isSubmitting: false
 };
-let isTrackedTeamMenuOpen = false;
+let trackTeamModal: TrackTeamModalState = {
+  isOpen: false,
+  selectedTeam: "",
+  isMenuOpen: false,
+  searchQuery: ""
+};
 let createLobbyModal: CreateLobbyModalState = {
   isOpen: false,
   name: "",
@@ -568,7 +582,8 @@ let globalPlacementPredictionModal: GlobalPlacementPredictionModalState = {
   isOpen: false,
   predictionId: null,
   selectedTeam: "",
-  isMenuOpen: false
+  isMenuOpen: false,
+  searchQuery: ""
 };
 let predictionCopyModal: PredictionCopyModalState = {
   isOpen: false,
@@ -862,6 +877,7 @@ const copy: Record<Language, Copy> = {
       globalPredictions: "Global predictions",
       chooseGlobalPrediction: (prediction) => `Choose the ${prediction} of the competition.`,
       chooseCountry: "Choose a country",
+      searchCountry: "Search country",
       confirmGlobalPrediction: "Confirm selection",
       closeRules: "Close rules",
       rulesTitle: "Lobby rules",
@@ -1193,6 +1209,7 @@ const copy: Record<Language, Copy> = {
       globalPredictions: "Pronósticos globales",
       chooseGlobalPrediction: (prediction) => `Elige el ${prediction} de la competición.`,
       chooseCountry: "Elige un país",
+      searchCountry: "Buscar país",
       confirmGlobalPrediction: "Confirmar selección",
       closeRules: "Cerrar reglas",
       rulesTitle: "Reglas del lobby",
@@ -2764,7 +2781,6 @@ const renderTrackedTeamDropdown = (selectedCopy: Copy, language: Language) => {
         class="tracked-team-trigger"
         type="button"
         id="tracked-team-trigger"
-        aria-expanded="${isTrackedTeamMenuOpen ? "true" : "false"}"
       >
         ${
           selectedTeam
@@ -2772,18 +2788,6 @@ const renderTrackedTeamDropdown = (selectedCopy: Copy, language: Language) => {
             : `<span>${selectedCopy.customSettingsPage.trackedTeamPlaceholder}</span>`
         }
       </button>
-      <div class="tracked-team-menu" id="tracked-team-menu" ${isTrackedTeamMenuOpen ? "" : "hidden"}>
-        ${teams
-          .map(
-            (team) => `
-              <button type="button" data-tracked-team="${team.team.en}">
-                <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
-                <span>${team.team[language]}</span>
-              </button>
-            `
-          )
-          .join("")}
-      </div>
     </div>
   `;
 };
@@ -3153,6 +3157,11 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
   const teams = getParticipatingTeams(language);
   const selectedTeam = teams.find((team) => team.team.en === globalPlacementPredictionModal.selectedTeam);
   const predictionLabel = getGlobalPlacementPredictionLabel(selectedCopy, globalPlacementPredictionModal.predictionId);
+  const searchQuery = globalPlacementPredictionModal.searchQuery.trim().toLocaleLowerCase();
+  const filteredTeams = teams.filter((team) => {
+    const searchableNames = [team.team.en, team.team.es].map((name) => name.toLocaleLowerCase());
+    return !searchQuery || searchableNames.some((name) => name.startsWith(searchQuery));
+  });
 
   return `
     <div class="modal-backdrop" role="presentation" id="global-placement-backdrop">
@@ -3179,10 +3188,22 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
             }
           </button>
           <div class="tracked-team-menu" id="global-placement-team-menu" ${globalPlacementPredictionModal.isMenuOpen ? "" : "hidden"}>
-            ${teams
+            <input
+              class="global-placement-search"
+              id="global-placement-search"
+              type="text"
+              autocomplete="off"
+              placeholder="${selectedCopy.lobbyPage.searchCountry}"
+              value="${globalPlacementPredictionModal.searchQuery}"
+            />
+            ${filteredTeams
               .map(
                 (team) => `
-                  <button type="button" data-global-placement-team="${team.team.en}">
+                  <button
+                    type="button"
+                    data-global-placement-team="${team.team.en}"
+                    data-global-placement-search="${team.team.en.toLocaleLowerCase()}|${team.team.es.toLocaleLowerCase()}"
+                  >
                     <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
                     <span>${team.team[language]}</span>
                   </button>
@@ -3196,6 +3217,81 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
             ${selectedCopy.leaveLobby.cancel}
           </button>
           <button class="primary-action" type="button" id="global-placement-confirm" ${globalPlacementPredictionModal.selectedTeam ? "" : "disabled"}>
+            ${selectedCopy.lobbyPage.confirmGlobalPrediction}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
+const renderTrackTeamModal = (selectedCopy: Copy, language: Language) => {
+  if (!trackTeamModal.isOpen) {
+    return "";
+  }
+
+  const teams = getParticipatingTeams(language);
+  const selectedTeam = teams.find((team) => team.team.en === trackTeamModal.selectedTeam);
+  const searchQuery = trackTeamModal.searchQuery.trim().toLocaleLowerCase();
+  const filteredTeams = teams.filter((team) => {
+    const searchableNames = [team.team.en, team.team.es].map((name) => name.toLocaleLowerCase());
+    return !searchQuery || searchableNames.some((name) => name.startsWith(searchQuery));
+  });
+
+  return `
+    <div class="modal-backdrop" role="presentation" id="track-team-backdrop">
+      <section class="join-lobby-modal global-placement-modal" role="dialog" aria-modal="true" aria-labelledby="track-team-title">
+        <div class="modal-header">
+          <h2 id="track-team-title">${selectedCopy.customSettingsPage.trackedTeamLabel}</h2>
+          <button class="modal-close" type="button" id="track-team-close" aria-label="${selectedCopy.leaveLobby.cancel}">
+            &times;
+          </button>
+        </div>
+        <p class="leave-lobby-body">${selectedCopy.lobbyPage.chooseGlobalPrediction(selectedCopy.customSettingsPage.trackedTeamLabel)}</p>
+        <div class="tracked-team-control global-placement-country-control">
+          <span>${selectedCopy.lobbyPage.chooseCountry}</span>
+          <button
+            class="tracked-team-trigger"
+            type="button"
+            id="track-team-modal-trigger"
+            aria-expanded="${trackTeamModal.isMenuOpen ? "true" : "false"}"
+          >
+            ${
+              selectedTeam
+                ? `<img src="${selectedTeam.flagSrc}" alt="${selectedTeam.flagAlt[language]}" /><span>${selectedTeam.team[language]}</span>`
+                : `<span>${selectedCopy.customSettingsPage.trackedTeamPlaceholder}</span>`
+            }
+          </button>
+          <div class="tracked-team-menu" id="track-team-modal-menu" ${trackTeamModal.isMenuOpen ? "" : "hidden"}>
+            <input
+              class="global-placement-search"
+              id="track-team-search"
+              type="text"
+              autocomplete="off"
+              placeholder="${selectedCopy.lobbyPage.searchCountry}"
+              value="${trackTeamModal.searchQuery}"
+            />
+            ${filteredTeams
+              .map(
+                (team) => `
+                  <button
+                    type="button"
+                    data-track-team="${team.team.en}"
+                    data-track-team-search="${team.team.en.toLocaleLowerCase()}|${team.team.es.toLocaleLowerCase()}"
+                  >
+                    <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
+                    <span>${team.team[language]}</span>
+                  </button>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="track-team-cancel">
+            ${selectedCopy.leaveLobby.cancel}
+          </button>
+          <button class="primary-action" type="button" id="track-team-confirm" ${trackTeamModal.selectedTeam ? "" : "disabled"}>
             ${selectedCopy.lobbyPage.confirmGlobalPrediction}
           </button>
         </div>
@@ -3478,6 +3574,7 @@ const render = (language: Language) => {
   ${renderLobbyRulesModal(selectedCopy, language)}
   ${renderPredictionCopyModal(selectedCopy)}
   ${renderGlobalPlacementPredictionModal(selectedCopy, language)}
+  ${renderTrackTeamModal(selectedCopy, language)}
 `;
   const languageControl = document.querySelector<HTMLDivElement>(".language-control");
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
@@ -3538,13 +3635,20 @@ const render = (language: Language) => {
   const globalPlacementConfirmButton = document.querySelector<HTMLButtonElement>("#global-placement-confirm");
   const globalPlacementTeamTrigger = document.querySelector<HTMLButtonElement>("#global-placement-team-trigger");
   const globalPlacementTeamMenu = document.querySelector<HTMLDivElement>("#global-placement-team-menu");
+  const globalPlacementSearchInput = document.querySelector<HTMLInputElement>("#global-placement-search");
   const globalPlacementTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-global-placement-team]");
   const customFieldToggles = document.querySelectorAll<HTMLInputElement>("[data-custom-field-toggle]");
   const customFieldInputs = document.querySelectorAll<HTMLInputElement>("[data-custom-field-value]");
   const customFeatureToggles = document.querySelectorAll<HTMLInputElement>("[data-custom-feature-toggle]");
   const trackedTeamTrigger = document.querySelector<HTMLButtonElement>("#tracked-team-trigger");
-  const trackedTeamMenu = document.querySelector<HTMLDivElement>("#tracked-team-menu");
-  const trackedTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-tracked-team]");
+  const trackTeamBackdrop = document.querySelector<HTMLDivElement>("#track-team-backdrop");
+  const trackTeamCloseButton = document.querySelector<HTMLButtonElement>("#track-team-close");
+  const trackTeamCancelButton = document.querySelector<HTMLButtonElement>("#track-team-cancel");
+  const trackTeamConfirmButton = document.querySelector<HTMLButtonElement>("#track-team-confirm");
+  const trackTeamModalTrigger = document.querySelector<HTMLButtonElement>("#track-team-modal-trigger");
+  const trackTeamModalMenu = document.querySelector<HTMLDivElement>("#track-team-modal-menu");
+  const trackTeamSearchInput = document.querySelector<HTMLInputElement>("#track-team-search");
+  const trackTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-track-team]");
   const customSettingsSaveButton = document.querySelector<HTMLButtonElement>("#custom-settings-save");
 
   const closeLanguageMenu = () => {
@@ -3772,7 +3876,8 @@ const render = (language: Language) => {
       isOpen: false,
       predictionId: null,
       selectedTeam: "",
-      isMenuOpen: false
+      isMenuOpen: false,
+      searchQuery: ""
     };
     render(getStoredLanguage());
   };
@@ -3791,7 +3896,8 @@ const render = (language: Language) => {
         isOpen: true,
         predictionId,
         selectedTeam: storedPredictions[predictionId] ?? "",
-        isMenuOpen: false
+        isMenuOpen: false,
+        searchQuery: ""
       };
       render(getStoredLanguage());
     });
@@ -3806,11 +3912,16 @@ const render = (language: Language) => {
   });
 
   globalPlacementTeamTrigger?.addEventListener("click", () => {
+    const isOpening = !globalPlacementPredictionModal.isMenuOpen;
     globalPlacementPredictionModal = {
       ...globalPlacementPredictionModal,
-      isMenuOpen: !globalPlacementPredictionModal.isMenuOpen
+      isMenuOpen: isOpening,
+      searchQuery: isOpening ? "" : globalPlacementPredictionModal.searchQuery
     };
     render(getStoredLanguage());
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>("#global-placement-search")?.focus();
+    }, 0);
   });
 
   globalPlacementTeamTrigger?.addEventListener("click", (event) => {
@@ -3821,12 +3932,25 @@ const render = (language: Language) => {
     event.stopPropagation();
   });
 
+  globalPlacementSearchInput?.addEventListener("input", () => {
+    const query = globalPlacementSearchInput.value.trim().toLocaleLowerCase();
+    globalPlacementPredictionModal = {
+      ...globalPlacementPredictionModal,
+      searchQuery: globalPlacementSearchInput.value
+    };
+    globalPlacementTeamButtons.forEach((button) => {
+      const searchableNames = (button.dataset.globalPlacementSearch ?? "").split("|");
+      button.hidden = Boolean(query) && !searchableNames.some((name) => name.startsWith(query));
+    });
+  });
+
   globalPlacementTeamButtons.forEach((button) => {
     button.addEventListener("click", () => {
       globalPlacementPredictionModal = {
         ...globalPlacementPredictionModal,
         selectedTeam: button.dataset.globalPlacementTeam ?? "",
-        isMenuOpen: false
+        isMenuOpen: false,
+        searchQuery: ""
       };
       render(getStoredLanguage());
     });
@@ -3949,43 +4073,100 @@ const render = (language: Language) => {
     });
   });
 
+  const closeTrackTeamModal = () => {
+    trackTeamModal = {
+      isOpen: false,
+      selectedTeam: "",
+      isMenuOpen: false,
+      searchQuery: ""
+    };
+    render(getStoredLanguage());
+  };
+
   trackedTeamTrigger?.addEventListener("click", () => {
-    isTrackedTeamMenuOpen = !isTrackedTeamMenuOpen;
+    trackTeamModal = {
+      isOpen: true,
+      selectedTeam: customSettingsState.trackedTeam,
+      isMenuOpen: false,
+      searchQuery: ""
+    };
     render(getStoredLanguage());
   });
 
-  trackedTeamTrigger?.addEventListener("click", (event) => {
-    event.stopPropagation();
-  });
-
-  trackedTeamMenu?.addEventListener("click", (event) => {
-    event.stopPropagation();
-  });
-
-  trackedTeamMenu?.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      isTrackedTeamMenuOpen = false;
-      render(getStoredLanguage());
+  trackTeamCloseButton?.addEventListener("click", closeTrackTeamModal);
+  trackTeamCancelButton?.addEventListener("click", closeTrackTeamModal);
+  trackTeamBackdrop?.addEventListener("click", (event) => {
+    if (event.target === trackTeamBackdrop) {
+      closeTrackTeamModal();
     }
   });
 
-  trackedTeamButtons.forEach((button) => {
+  trackTeamModalTrigger?.addEventListener("click", () => {
+    const isOpening = !trackTeamModal.isMenuOpen;
+    trackTeamModal = {
+      ...trackTeamModal,
+      isMenuOpen: isOpening,
+      searchQuery: isOpening ? "" : trackTeamModal.searchQuery
+    };
+    render(getStoredLanguage());
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>("#track-team-search")?.focus();
+    }, 0);
+  });
+
+  trackTeamModalTrigger?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  trackTeamModalMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  trackTeamSearchInput?.addEventListener("input", () => {
+    const query = trackTeamSearchInput.value.trim().toLocaleLowerCase();
+    trackTeamModal = {
+      ...trackTeamModal,
+      searchQuery: trackTeamSearchInput.value
+    };
+    trackTeamButtons.forEach((button) => {
+      const searchableNames = (button.dataset.trackTeamSearch ?? "").split("|");
+      button.hidden = Boolean(query) && !searchableNames.some((name) => name.startsWith(query));
+    });
+  });
+
+  trackTeamButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      customSettingsState = {
-        ...customSettingsState,
-        trackedTeam: button.dataset.trackedTeam ?? "",
-        message: null
+      trackTeamModal = {
+        ...trackTeamModal,
+        selectedTeam: button.dataset.trackTeam ?? "",
+        isMenuOpen: false,
+        searchQuery: ""
       };
-      isTrackedTeamMenuOpen = false;
       render(getStoredLanguage());
     });
   });
 
-  if (isTrackedTeamMenuOpen) {
+  trackTeamConfirmButton?.addEventListener("click", () => {
+    if (!trackTeamModal.selectedTeam) {
+      return;
+    }
+
+    customSettingsState = {
+      ...customSettingsState,
+      trackedTeam: trackTeamModal.selectedTeam,
+      message: null
+    };
+    closeTrackTeamModal();
+  });
+
+  if (trackTeamModal.isMenuOpen) {
     document.addEventListener(
       "click",
       () => {
-        isTrackedTeamMenuOpen = false;
+        trackTeamModal = {
+          ...trackTeamModal,
+          isMenuOpen: false
+        };
         render(getStoredLanguage());
       },
       { once: true }
