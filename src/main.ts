@@ -139,6 +139,22 @@ type MatchPrediction = {
   awayScore: number | null;
 };
 
+type ScoreboardRow = {
+  userId: number;
+  username: string;
+  totalPoints: number;
+  groupStagePoints: number;
+  knockoutStagePoints: number;
+  dailyPoints: number;
+};
+
+type LobbyScoreboard = {
+  date: string;
+  general: ScoreboardRow[];
+  groupStage: ScoreboardRow[];
+  knockoutStage: ScoreboardRow[];
+};
+
 type PredictionSaveState = "idle" | "saving" | "saved" | "error";
 
 type CreateLobbyModalState = {
@@ -350,6 +366,16 @@ type Copy = {
     rulesUnavailable: string;
     customRulesTitle: string;
     enabledFeatures: string;
+    scoreboardTitle: string;
+    scoreboardGeneral: string;
+    scoreboardGroupStage: string;
+    scoreboardKnockoutStage: string;
+    scoreboardDailyPoints: (date: string) => string;
+    scoreboardLoading: string;
+    scoreboardError: string;
+    scoreboardEmpty: string;
+    scoreboardUser: string;
+    scoreboardPoints: string;
   };
   lobbyActions: {
     joinTitle: string;
@@ -547,6 +573,7 @@ let carouselMatches: CarouselMatch[] = [];
 let allMatches: CarouselMatch[] = [];
 let currentLobby: Lobby | null = null;
 let userLobbies: Lobby[] = [];
+let lobbyScoreboard: LobbyScoreboard | null = null;
 let matchPredictions: Record<number, MatchPrediction> = {};
 let predictionSaveStates: Record<number, PredictionSaveState> = {};
 let selectedPredictionLobbyCode = defaultPredictionLobbyCode;
@@ -557,11 +584,13 @@ let isCurrentUserLoading = true;
 let isMatchesLoading = true;
 let isAllMatchesLoading = false;
 let isLobbyLoading = false;
+let isLobbyScoreboardLoading = false;
 let isUserLobbiesLoading = false;
 let isPredictionsLoading = false;
 let matchesError: string | null = null;
 let allMatchesError: string | null = null;
 let lobbyError: string | null = null;
+let lobbyScoreboardError: string | null = null;
 let userLobbiesError: string | null = null;
 let predictionsError: string | null = null;
 let areLobbyRulesVisible = false;
@@ -949,7 +978,17 @@ const copy: Record<Language, Copy> = {
       pointSystem: "Point system",
       rulesUnavailable: "Rules are not available for this lobby yet.",
       customRulesTitle: "Custom scoring values",
-      enabledFeatures: "Enabled features"
+      enabledFeatures: "Enabled features",
+      scoreboardTitle: "Scoreboard",
+      scoreboardGeneral: "General",
+      scoreboardGroupStage: "Group stage",
+      scoreboardKnockoutStage: "Knockout stage",
+      scoreboardDailyPoints: (date) => `Points today (${date})`,
+      scoreboardLoading: "Loading scoreboard...",
+      scoreboardError: "The scoreboard is not available right now.",
+      scoreboardEmpty: "No scored predictions yet.",
+      scoreboardUser: "User",
+      scoreboardPoints: "Points"
     },
     lobbyActions: {
       joinTitle: "Join a group",
@@ -1284,7 +1323,17 @@ const copy: Record<Language, Copy> = {
       pointSystem: "Sistema de puntos",
       rulesUnavailable: "Las reglas todavía no están disponibles para este lobby.",
       customRulesTitle: "Valores de puntaje personalizado",
-      enabledFeatures: "Funciones activas"
+      enabledFeatures: "Funciones activas",
+      scoreboardTitle: "Tabla de puntos",
+      scoreboardGeneral: "General",
+      scoreboardGroupStage: "Fase de grupos",
+      scoreboardKnockoutStage: "Fase eliminatoria",
+      scoreboardDailyPoints: (date) => `Puntos de hoy (${date})`,
+      scoreboardLoading: "Cargando tabla de puntos...",
+      scoreboardError: "La tabla de puntos no está disponible en este momento.",
+      scoreboardEmpty: "Todavía no hay pronósticos con puntos.",
+      scoreboardUser: "Usuario",
+      scoreboardPoints: "Puntos"
     },
     lobbyActions: {
       joinTitle: "Unirse a un grupo",
@@ -3023,6 +3072,71 @@ const renderBracketHeavyModal = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const renderScoreboardTable = (
+  title: string,
+  rows: ScoreboardRow[],
+  pointsKey: "totalPoints" | "groupStagePoints" | "knockoutStagePoints",
+  selectedCopy: Copy,
+  showDailyPoints = false
+) => `
+  <article class="scoreboard-card">
+    <h3>${title}</h3>
+    ${
+      rows.length === 0
+        ? `<div class="lobby-empty">${selectedCopy.lobbyPage.scoreboardEmpty}</div>`
+        : `<table class="scoreboard-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>${selectedCopy.lobbyPage.scoreboardUser}</th>
+                <th>${selectedCopy.lobbyPage.scoreboardPoints}</th>
+                ${showDailyPoints ? `<th>${selectedCopy.lobbyPage.scoreboardDailyPoints(lobbyScoreboard?.date ?? "")}</th>` : ""}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row, index) => `
+                    <tr>
+                      <td>${index + 1}</td>
+                      <td>${escapeHtml(row.username)}</td>
+                      <td><strong>${row[pointsKey]}</strong></td>
+                      ${
+                        showDailyPoints
+                          ? `<td><span class="daily-points ${row.dailyPoints > 0 ? "is-positive" : "is-zero"}">${row.dailyPoints > 0 ? `+${row.dailyPoints}` : "0"}</span></td>`
+                          : ""
+                      }
+                    </tr>
+                  `
+                )
+                .join("")}
+            </tbody>
+          </table>`
+    }
+  </article>
+`;
+
+const renderLobbyScoreboard = (selectedCopy: Copy) => `
+  <article class="lobby-card scoreboard-section">
+    <div class="lobby-card-header">
+      <span>${selectedCopy.lobbyPage.scoreboardTitle}</span>
+    </div>
+    ${
+      isLobbyScoreboardLoading
+        ? `<div class="matches-state">${selectedCopy.lobbyPage.scoreboardLoading}</div>`
+        : lobbyScoreboardError
+          ? `<div class="matches-state">${selectedCopy.lobbyPage.scoreboardError}</div>`
+          : !lobbyScoreboard
+            ? `<div class="lobby-empty">${selectedCopy.lobbyPage.scoreboardEmpty}</div>`
+            : `<div class="scoreboard-grid">
+                ${renderScoreboardTable(selectedCopy.lobbyPage.scoreboardGeneral, lobbyScoreboard.general, "totalPoints", selectedCopy, true)}
+                ${renderScoreboardTable(selectedCopy.lobbyPage.scoreboardGroupStage, lobbyScoreboard.groupStage, "groupStagePoints", selectedCopy)}
+                ${renderScoreboardTable(selectedCopy.lobbyPage.scoreboardKnockoutStage, lobbyScoreboard.knockoutStage, "knockoutStagePoints", selectedCopy)}
+              </div>`
+    }
+  </article>
+`;
+
 const renderLobbyPage = (selectedCopy: Copy, language: Language) => {
   const lobbyCode = getLobbyCodeFromUrl();
   const isAdmin = isCurrentUserLobbyAdmin(currentLobby);
@@ -3097,6 +3211,7 @@ const renderLobbyPage = (selectedCopy: Copy, language: Language) => {
                             `
                         }
                       </article>
+                      ${renderLobbyScoreboard(selectedCopy)}
                     </div>
                     ${
                       isMember
@@ -6254,6 +6369,8 @@ const loadLobby = async () => {
   isLobbyLoading = true;
   lobbyError = null;
   currentLobby = null;
+  lobbyScoreboard = null;
+  lobbyScoreboardError = null;
   areLobbyRulesVisible = false;
   render(getStoredLanguage());
 
@@ -6273,11 +6390,40 @@ const loadLobby = async () => {
 
     const result = (await response.json()) as { lobby?: Lobby };
     currentLobby = result.lobby ?? null;
+    if (currentLobby) {
+      void loadLobbyScoreboard(currentLobby.code);
+    }
   } catch {
     currentLobby = null;
     lobbyError = "unavailable";
   } finally {
     isLobbyLoading = false;
+    render(getStoredLanguage());
+  }
+};
+
+const loadLobbyScoreboard = async (lobbyCode: string) => {
+  isLobbyScoreboardLoading = true;
+  lobbyScoreboardError = null;
+  lobbyScoreboard = null;
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/scoreboard`, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not load scoreboard.");
+    }
+
+    const result = (await response.json()) as { scoreboard?: LobbyScoreboard };
+    lobbyScoreboard = result.scoreboard ?? null;
+  } catch {
+    lobbyScoreboard = null;
+    lobbyScoreboardError = "unavailable";
+  } finally {
+    isLobbyScoreboardLoading = false;
     render(getStoredLanguage());
   }
 };

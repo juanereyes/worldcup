@@ -1222,6 +1222,83 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   padding: 20px 16px;
 }
 
+.scoreboard-section {
+  display: grid;
+  gap: 14px;
+}
+
+.scoreboard-grid {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.scoreboard-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.scoreboard-card h3 {
+  color: var(--green-dark);
+  font-size: 0.95rem;
+  margin: 0;
+  padding: 12px 12px 0;
+}
+
+.scoreboard-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.scoreboard-table th,
+.scoreboard-table td {
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 0.86rem;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.scoreboard-table th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.scoreboard-table th:first-child,
+.scoreboard-table td:first-child {
+  width: 1%;
+}
+
+.scoreboard-table th:last-child,
+.scoreboard-table td:last-child {
+  text-align: right;
+}
+
+.daily-points {
+  border-radius: 999px;
+  display: inline-flex;
+  font-weight: 850;
+  justify-content: center;
+  min-width: 42px;
+  padding: 4px 8px;
+}
+
+.daily-points.is-zero {
+  background: #ecefed;
+  color: var(--muted);
+}
+
+.daily-points.is-positive {
+  background: rgba(15, 107, 79, 0.14);
+  color: var(--green);
+}
+
 .compact-secondary-action {
   min-height: auto;
   padding: 8px 12px;

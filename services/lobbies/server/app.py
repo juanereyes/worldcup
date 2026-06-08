@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from lobby_service.database import (
     InvalidLobbyPasswordCredentialsError,
@@ -28,6 +31,7 @@ from lobby_service.database import (
     get_lobby_for_member,
     initialize_database,
     list_default_match_predictions,
+    list_lobby_match_predictions,
     list_match_predictions,
     list_user_lobbies,
     remove_lobby_member,
@@ -37,11 +41,28 @@ from lobby_service.database import (
     set_lobby_custom_settings,
     set_lobby_point_system,
 )
+from lobby_service.scoring import (
+    ScorePrediction,
+    score_regular_match_prediction,
+    score_simple_match_prediction,
+)
 
 HOST = "127.0.0.1"
 PORT = 8003
 ALLOWED_ORIGINS = {"http://127.0.0.1:5173"}
 AUTH_SESSION_URL = os.environ.get("AUTH_SESSION_URL", "http://127.0.0.1:8001/session")
+MATCHES_URL = os.environ.get("MATCHES_URL", "http://127.0.0.1:8002/matches")
+BOGOTA_TZ = ZoneInfo("America/Bogota")
+
+
+@dataclass(frozen=True)
+class FinishedMatch:
+    id: int
+    stage: str
+    group: str | None
+    date: str
+    home_score: int
+    away_score: int
 
 
 class AuthenticationError(ValueError):
@@ -83,6 +104,185 @@ def validate_auth_session(cookie_header: str) -> dict[str, Any]:
         raise AuthenticationError("Authentication is required.")
 
     return user
+
+
+def fetch_finished_matches() -> dict[int, FinishedMatch]:
+    request = Request(MATCHES_URL, headers={"Accept": "application/json"}, method="GET")
+
+    try:
+        with urlopen(request, timeout=4) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, OSError, URLError, json.JSONDecodeError) as error:
+        raise RuntimeError("Could not load match results for the scoreboard.") from error
+
+    raw_matches = payload.get("matches") if isinstance(payload, dict) else None
+
+    if not isinstance(raw_matches, list):
+        raise RuntimeError("Match results payload is invalid.")
+
+    finished_matches: dict[int, FinishedMatch] = {}
+
+    for raw_match in raw_matches:
+        if not isinstance(raw_match, dict) or raw_match.get("status") != "FINISHED":
+            continue
+
+        raw_score = raw_match.get("score") if isinstance(raw_match.get("score"), dict) else {}
+        home_score = raw_score.get("home")
+        away_score = raw_score.get("away")
+
+        if not isinstance(home_score, int) or not isinstance(away_score, int):
+            continue
+
+        try:
+            match_id = int(raw_match.get("id"))
+        except (TypeError, ValueError):
+            continue
+
+        finished_matches[match_id] = FinishedMatch(
+            id=match_id,
+            stage=str(raw_match.get("stage", "")),
+            group=raw_match.get("group") if isinstance(raw_match.get("group"), str) else None,
+            date=match_bogota_date(str(raw_match.get("utcDate", ""))),
+            home_score=home_score,
+            away_score=away_score,
+        )
+
+    return finished_matches
+
+
+def match_bogota_date(utc_date: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+
+    return parsed.astimezone(BOGOTA_TZ).date().isoformat()
+
+
+def build_scoreboard_payload(lobby: LobbyRecord, predictions: list[Any], matches: dict[int, FinishedMatch]) -> dict[str, Any]:
+    today = datetime.now(BOGOTA_TZ).date().isoformat()
+    rows = {
+        member.user_id: {
+            "userId": member.user_id,
+            "username": member.username,
+            "totalPoints": 0,
+            "groupStagePoints": 0,
+            "knockoutStagePoints": 0,
+            "dailyPoints": 0,
+        }
+        for member in lobby.members
+    }
+
+    for prediction in predictions:
+        match = matches.get(prediction.match_id)
+
+        if (
+            match is None
+            or prediction.home_score is None
+            or prediction.away_score is None
+        ):
+            continue
+
+        points = score_lobby_match_prediction(
+            lobby,
+            ScorePrediction(home=prediction.home_score, away=prediction.away_score),
+            ScorePrediction(home=match.home_score, away=match.away_score),
+        )
+        row = rows.get(prediction.user_id)
+
+        if row is None:
+            continue
+
+        row["totalPoints"] += points
+
+        if is_group_stage_match(match):
+            row["groupStagePoints"] += points
+        else:
+            row["knockoutStagePoints"] += points
+
+        if match.date == today:
+            row["dailyPoints"] += points
+
+    return {
+        "scoreboard": {
+            "date": today,
+            "general": sort_scoreboard_rows(rows.values(), "totalPoints"),
+            "groupStage": sort_scoreboard_rows(rows.values(), "groupStagePoints"),
+            "knockoutStage": sort_scoreboard_rows(rows.values(), "knockoutStagePoints"),
+        }
+    }
+
+
+def score_lobby_match_prediction(lobby: LobbyRecord, prediction: ScorePrediction, actual: ScorePrediction) -> int:
+    if lobby.point_system == "regular":
+        return score_regular_match_prediction(prediction, actual)
+
+    if lobby.point_system == "custom":
+        return score_custom_match_prediction(lobby.custom_settings or {}, prediction, actual)
+
+    return score_simple_match_prediction(prediction, actual)
+
+
+def score_custom_match_prediction(settings: dict[str, Any], prediction: ScorePrediction, actual: ScorePrediction) -> int:
+    values = settings.get("values") if isinstance(settings.get("values"), dict) else {}
+    enabled = settings.get("enabledFields") if isinstance(settings.get("enabledFields"), dict) else {}
+
+    def points(field: str) -> int:
+        try:
+            return max(0, int(values.get(field, 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    def is_enabled(field: str) -> bool:
+        return bool(enabled.get(field))
+
+    if prediction == actual and is_enabled("exactScore"):
+        return points("exactScore")
+
+    prediction_result = match_result(prediction)
+    actual_result = match_result(actual)
+
+    if prediction_result == actual_result:
+        if (
+            actual_result != "draw"
+            and abs(prediction.home - prediction.away) == abs(actual.home - actual.away)
+            and is_enabled("resultGoalDifference")
+        ):
+            return points("resultGoalDifference")
+
+        if is_enabled("correctResult"):
+            return points("correctResult")
+
+    if prediction_result != actual_result:
+        home_points = points("homeGoal") if prediction.home == actual.home and is_enabled("homeGoal") else 0
+        away_points = points("awayGoal") if prediction.away == actual.away and is_enabled("awayGoal") else 0
+        return max(home_points, away_points)
+
+    return 0
+
+
+def match_result(score: ScorePrediction) -> str:
+    if score.home > score.away:
+        return "home"
+
+    if score.away > score.home:
+        return "away"
+
+    return "draw"
+
+
+def is_group_stage_match(match: FinishedMatch) -> bool:
+    return match.group is not None or match.stage == "Group Stage"
+
+
+def sort_scoreboard_rows(rows: Any, points_key: str) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in sorted(
+            rows,
+            key=lambda row: (-int(row[points_key]), str(row["username"]).casefold()),
+        )
+    ]
 
 
 class LobbyRequestHandler(BaseHTTPRequestHandler):
@@ -128,6 +328,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
         if len(path_parts) == 3 and path_parts[0] == "lobbies" and path_parts[2] == "predictions":
             self.list_lobby_predictions(path_parts[1])
+            return
+
+        if len(path_parts) == 3 and path_parts[0] == "lobbies" and path_parts[2] == "scoreboard":
+            self.get_lobby_scoreboard(path_parts[1])
             return
 
         if len(path_parts) == 2 and path_parts[0] == "predictions" and path_parts[1] == "default":
@@ -353,6 +557,40 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
 
         self.send_json(200, {"predictions": [self.match_prediction_payload(prediction) for prediction in predictions]})
+
+    def get_lobby_scoreboard(self, code: str) -> None:
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                authenticated_user = self.get_authenticated_user()
+                lobby = get_lobby_for_member(
+                    connection,
+                    code=code,
+                    user_id=int(authenticated_user["id"]),
+                )
+                predictions = list_lobby_match_predictions(
+                    connection,
+                    code=code,
+                    requesting_user_id=int(authenticated_user["id"]),
+                )
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+
+        try:
+            matches = fetch_finished_matches()
+        except RuntimeError as error:
+            self.send_json(502, {"error": str(error)})
+            return
+
+        self.send_json(200, build_scoreboard_payload(lobby, predictions, matches))
 
     def list_default_predictions(self) -> None:
         with connect() as connection:

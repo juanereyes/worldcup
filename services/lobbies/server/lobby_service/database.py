@@ -85,6 +85,15 @@ class MatchPredictionRecord:
     away_score: int | None
 
 
+@dataclass(frozen=True)
+class MemberMatchPredictionRecord:
+    user_id: int
+    username: str
+    match_id: int
+    home_score: int | None
+    away_score: int | None
+
+
 def get_database_path() -> Path:
     configured_path = os.environ.get("LOBBIES_DB_PATH")
     return Path(configured_path) if configured_path else DEFAULT_DB_PATH
@@ -576,6 +585,48 @@ def list_match_predictions(
 
     return [
         MatchPredictionRecord(
+            match_id=int(row["match_id"]),
+            home_score=int(row["home_score"]) if row["home_score"] is not None else None,
+            away_score=int(row["away_score"]) if row["away_score"] is not None else None,
+        )
+        for row in rows
+    ]
+
+
+def list_lobby_match_predictions(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    requesting_user_id: int,
+) -> list[MemberMatchPredictionRecord]:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_member(connection, normalized_code, requesting_user_id):
+        raise LobbyPermissionError("Only lobby members can view the scoreboard.")
+
+    rows = connection.execute(
+        """
+        SELECT
+          match_predictions.user_id,
+          lobby_members.username,
+          match_predictions.match_id,
+          match_predictions.home_score,
+          match_predictions.away_score
+        FROM match_predictions
+        JOIN lobby_members
+          ON lobby_members.lobby_code = match_predictions.lobby_code
+         AND lobby_members.user_id = match_predictions.user_id
+        WHERE match_predictions.lobby_code = ?
+        ORDER BY lobby_members.username COLLATE NOCASE ASC, match_predictions.match_id ASC
+        """,
+        (normalized_code,),
+    ).fetchall()
+
+    return [
+        MemberMatchPredictionRecord(
+            user_id=int(row["user_id"]),
+            username=str(row["username"]),
             match_id=int(row["match_id"]),
             home_score=int(row["home_score"]) if row["home_score"] is not None else None,
             away_score=int(row["away_score"]) if row["away_score"] is not None else None,
