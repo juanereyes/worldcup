@@ -1690,10 +1690,20 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   display: none;
 }
 
+.phase-choice-menu {
+  max-height: 320px;
+  position: static;
+}
+
 .tracked-team-menu button {
   border-color: transparent;
   border-radius: 6px;
   width: 100%;
+}
+
+.tracked-team-menu button[aria-current="true"] {
+  background: var(--green);
+  color: var(--surface);
 }
 
 .tracked-team-menu button[hidden] {
@@ -1709,6 +1719,10 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 .player-prediction-choice {
   font-size: 0.86rem;
   line-height: 1.2;
+}
+
+.choose-team-description {
+  margin-bottom: 14px;
 }
 
 .global-placement-search {

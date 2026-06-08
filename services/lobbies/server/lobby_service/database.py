@@ -94,6 +94,18 @@ class MemberMatchPredictionRecord:
     away_score: int | None
 
 
+@dataclass(frozen=True)
+class MemberSpecialPredictionRecord:
+    user_id: int
+    username: str
+    prediction_type: str
+    team_name: str | None
+    player_country: str | None
+    player_name: str | None
+    player_number: int | None
+    selections: dict[str, str] | None
+
+
 def get_database_path() -> Path:
     configured_path = os.environ.get("LOBBIES_DB_PATH")
     return Path(configured_path) if configured_path else DEFAULT_DB_PATH
@@ -178,6 +190,23 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           away_score INTEGER CHECK (away_score IS NULL OR away_score >= 0),
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (user_id, match_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS special_predictions (
+          lobby_code TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          prediction_type TEXT NOT NULL,
+          team_name TEXT,
+          player_country TEXT,
+          player_name TEXT,
+          player_number INTEGER CHECK (player_number IS NULL OR player_number > 0),
+          selections_json TEXT,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (lobby_code, user_id, prediction_type),
+          FOREIGN KEY (lobby_code, user_id) REFERENCES lobby_members(lobby_code, user_id) ON DELETE CASCADE
         )
         """
     )
@@ -633,6 +662,145 @@ def list_lobby_match_predictions(
         )
         for row in rows
     ]
+
+
+def list_lobby_special_predictions(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    requesting_user_id: int,
+) -> list[MemberSpecialPredictionRecord]:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_member(connection, normalized_code, requesting_user_id):
+        raise LobbyPermissionError("Only lobby members can view the scoreboard.")
+
+    rows = connection.execute(
+        """
+        SELECT
+          special_predictions.user_id,
+          lobby_members.username,
+          special_predictions.prediction_type,
+          special_predictions.team_name,
+          special_predictions.player_country,
+          special_predictions.player_name,
+          special_predictions.player_number,
+          special_predictions.selections_json
+        FROM special_predictions
+        JOIN lobby_members
+          ON lobby_members.lobby_code = special_predictions.lobby_code
+         AND lobby_members.user_id = special_predictions.user_id
+        WHERE special_predictions.lobby_code = ?
+        ORDER BY lobby_members.username COLLATE NOCASE ASC, special_predictions.prediction_type ASC
+        """,
+        (normalized_code,),
+    ).fetchall()
+
+    records: list[MemberSpecialPredictionRecord] = []
+
+    for row in rows:
+        selections: dict[str, str] | None = None
+        if row["selections_json"]:
+            try:
+                parsed = json.loads(str(row["selections_json"]))
+            except json.JSONDecodeError:
+                parsed = None
+
+            if isinstance(parsed, dict):
+                selections = {
+                    str(key): str(value)
+                    for key, value in parsed.items()
+                    if isinstance(key, str) and isinstance(value, str)
+                }
+
+        records.append(
+            MemberSpecialPredictionRecord(
+                user_id=int(row["user_id"]),
+                username=str(row["username"]),
+                prediction_type=str(row["prediction_type"]),
+                team_name=str(row["team_name"]) if row["team_name"] else None,
+                player_country=str(row["player_country"]) if row["player_country"] else None,
+                player_name=str(row["player_name"]) if row["player_name"] else None,
+                player_number=int(row["player_number"]) if row["player_number"] is not None else None,
+                selections=selections,
+            )
+        )
+
+    return records
+
+
+def save_special_prediction(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    user_id: int,
+    prediction_type: str,
+    team_name: str | None = None,
+    player_country: str | None = None,
+    player_name: str | None = None,
+    player_number: int | None = None,
+    selections: dict[str, str] | None = None,
+) -> MemberSpecialPredictionRecord:
+    normalized_code = code.strip().upper()
+    normalized_type = prediction_type.strip()
+    get_lobby(connection, normalized_code)
+
+    if not normalized_type:
+        raise ValueError("Prediction type is required.")
+
+    if player_number is not None and player_number <= 0:
+        raise ValueError("Player number must be positive.")
+
+    if not _is_lobby_member(connection, normalized_code, user_id):
+        raise LobbyPermissionError("Only lobby members can save predictions.")
+
+    connection.execute(
+        """
+        INSERT INTO special_predictions (
+          lobby_code,
+          user_id,
+          prediction_type,
+          team_name,
+          player_country,
+          player_name,
+          player_number,
+          selections_json,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(lobby_code, user_id, prediction_type)
+        DO UPDATE SET
+          team_name = excluded.team_name,
+          player_country = excluded.player_country,
+          player_name = excluded.player_name,
+          player_number = excluded.player_number,
+          selections_json = excluded.selections_json,
+          updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            normalized_code,
+            user_id,
+            normalized_type,
+            team_name.strip() if team_name else None,
+            player_country.strip() if player_country else None,
+            player_name.strip() if player_name else None,
+            player_number,
+            json.dumps(selections, sort_keys=True) if selections is not None else None,
+        ),
+    )
+    connection.commit()
+
+    predictions = list_lobby_special_predictions(
+        connection,
+        code=normalized_code,
+        requesting_user_id=user_id,
+    )
+    return next(
+        prediction
+        for prediction in predictions
+        if prediction.user_id == user_id and prediction.prediction_type == normalized_type
+    )
 
 
 def list_default_match_predictions(connection: sqlite3.Connection, *, user_id: int) -> list[MatchPredictionRecord]:

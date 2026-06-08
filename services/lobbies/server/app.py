@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,16 +33,20 @@ from lobby_service.database import (
     initialize_database,
     list_default_match_predictions,
     list_lobby_match_predictions,
+    list_lobby_special_predictions,
     list_match_predictions,
     list_user_lobbies,
     remove_lobby_member,
     remove_lobby_member_by_admin,
     save_default_match_prediction,
     save_match_prediction,
+    save_special_prediction,
     set_lobby_custom_settings,
     set_lobby_point_system,
 )
 from lobby_service.scoring import (
+    REGULAR_GLOBAL_POINTS,
+    SIMPLE_GLOBAL_POINTS,
     ScorePrediction,
     score_regular_match_prediction,
     score_simple_match_prediction,
@@ -53,6 +58,17 @@ ALLOWED_ORIGINS = {"http://127.0.0.1:5173"}
 AUTH_SESSION_URL = os.environ.get("AUTH_SESSION_URL", "http://127.0.0.1:8001/session")
 MATCHES_URL = os.environ.get("MATCHES_URL", "http://127.0.0.1:8002/matches")
 BOGOTA_TZ = ZoneInfo("America/Bogota")
+PLAYER_STATS_PATH = os.environ.get(
+    "PLAYER_STATS_PATH",
+    str(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "playerGuideData.json")),
+)
+COUNTRY_RESULTS_PATH = os.environ.get(
+    "COUNTRY_RESULTS_PATH",
+    str(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "countryResults.json")),
+)
+GLOBAL_PLACEMENT_TYPES = {"champion", "runnerUp", "thirdPlace", "fourthPlace"}
+PLAYER_PREDICTION_TYPES = {"topScorer", "goldenBall", "favoritePlayer"}
+SPECIAL_PREDICTION_TYPES = GLOBAL_PLACEMENT_TYPES | PLAYER_PREDICTION_TYPES | {"chooseTeam", "trackTeam", "bracketHeavy"}
 
 
 @dataclass(frozen=True)
@@ -61,8 +77,21 @@ class FinishedMatch:
     stage: str
     group: str | None
     date: str
+    home_team: str
+    away_team: str
     home_score: int
     away_score: int
+
+
+@dataclass(frozen=True)
+class PlayerStat:
+    country: str
+    name: str
+    number: int
+    goals: int
+    assists: int
+    is_top_scorer: bool
+    is_golden_ball: bool
 
 
 class AuthenticationError(ValueError):
@@ -143,6 +172,8 @@ def fetch_finished_matches() -> dict[int, FinishedMatch]:
             stage=str(raw_match.get("stage", "")),
             group=raw_match.get("group") if isinstance(raw_match.get("group"), str) else None,
             date=match_bogota_date(str(raw_match.get("utcDate", ""))),
+            home_team=str(raw_match.get("homeTeam", "")),
+            away_team=str(raw_match.get("awayTeam", "")),
             home_score=home_score,
             away_score=away_score,
         )
@@ -159,7 +190,12 @@ def match_bogota_date(utc_date: str) -> str:
     return parsed.astimezone(BOGOTA_TZ).date().isoformat()
 
 
-def build_scoreboard_payload(lobby: LobbyRecord, predictions: list[Any], matches: dict[int, FinishedMatch]) -> dict[str, Any]:
+def build_scoreboard_payload(
+    lobby: LobbyRecord,
+    predictions: list[Any],
+    matches: dict[int, FinishedMatch],
+    special_predictions: list[Any] | None = None,
+) -> dict[str, Any]:
     today = datetime.now(BOGOTA_TZ).date().isoformat()
     rows = {
         member.user_id: {
@@ -172,6 +208,7 @@ def build_scoreboard_payload(lobby: LobbyRecord, predictions: list[Any], matches
         }
         for member in lobby.members
     }
+    special_by_user = special_predictions_by_user(special_predictions or [])
 
     for prediction in predictions:
         match = matches.get(prediction.match_id)
@@ -185,8 +222,11 @@ def build_scoreboard_payload(lobby: LobbyRecord, predictions: list[Any], matches
 
         points = score_lobby_match_prediction(
             lobby,
+            prediction.user_id,
             ScorePrediction(home=prediction.home_score, away=prediction.away_score),
             ScorePrediction(home=match.home_score, away=match.away_score),
+            match,
+            special_by_user,
         )
         row = rows.get(prediction.user_id)
 
@@ -203,6 +243,15 @@ def build_scoreboard_payload(lobby: LobbyRecord, predictions: list[Any], matches
         if match.date == today:
             row["dailyPoints"] += points
 
+    for user_id, points in score_special_predictions(lobby, special_by_user, matches).items():
+        row = rows.get(user_id)
+
+        if row is None:
+            continue
+
+        row["totalPoints"] += points["total"]
+        row["knockoutStagePoints"] += points["knockoutStage"]
+
     return {
         "scoreboard": {
             "date": today,
@@ -213,14 +262,30 @@ def build_scoreboard_payload(lobby: LobbyRecord, predictions: list[Any], matches
     }
 
 
-def score_lobby_match_prediction(lobby: LobbyRecord, prediction: ScorePrediction, actual: ScorePrediction) -> int:
+def score_lobby_match_prediction(
+    lobby: LobbyRecord,
+    user_id: int,
+    prediction: ScorePrediction,
+    actual: ScorePrediction,
+    match: FinishedMatch,
+    special_by_user: dict[int, dict[str, Any]],
+) -> int:
     if lobby.point_system == "regular":
-        return score_regular_match_prediction(prediction, actual)
+        points = score_regular_match_prediction(prediction, actual)
+    elif lobby.point_system == "custom":
+        points = score_custom_match_prediction(lobby.custom_settings or {}, prediction, actual)
+    else:
+        points = score_simple_match_prediction(prediction, actual)
 
-    if lobby.point_system == "custom":
-        return score_custom_match_prediction(lobby.custom_settings or {}, prediction, actual)
+    if (
+        lobby.point_system == "custom"
+        and is_custom_feature_enabled(lobby, "chooseTeam")
+        and normalized_team(special_by_user.get(user_id, {}).get("chooseTeam", {}).get("teamName"))
+        in {normalized_team(match.home_team), normalized_team(match.away_team)}
+    ):
+        return points * 2
 
-    return score_simple_match_prediction(prediction, actual)
+    return points
 
 
 def score_custom_match_prediction(settings: dict[str, Any], prediction: ScorePrediction, actual: ScorePrediction) -> int:
@@ -259,6 +324,398 @@ def score_custom_match_prediction(settings: dict[str, Any], prediction: ScorePre
         return max(home_points, away_points)
 
     return 0
+
+
+def special_predictions_by_user(predictions: list[Any]) -> dict[int, dict[str, Any]]:
+    grouped: dict[int, dict[str, Any]] = {}
+
+    for prediction in predictions:
+        user_predictions = grouped.setdefault(prediction.user_id, {})
+        payload: dict[str, Any] = {}
+
+        if prediction.team_name:
+            payload["teamName"] = prediction.team_name
+
+        if prediction.player_country:
+            payload["playerCountry"] = prediction.player_country
+
+        if prediction.player_name:
+            payload["playerName"] = prediction.player_name
+
+        if prediction.player_number is not None:
+            payload["playerNumber"] = prediction.player_number
+
+        if prediction.selections is not None:
+            payload["selections"] = prediction.selections
+
+        user_predictions[prediction.prediction_type] = payload
+
+    return grouped
+
+
+def score_special_predictions(
+    lobby: LobbyRecord,
+    special_by_user: dict[int, dict[str, Any]],
+    matches: dict[int, FinishedMatch],
+) -> dict[int, dict[str, int]]:
+    actual_placements = actual_global_placements(matches)
+    player_stats = load_player_stats()
+    points_by_user: dict[int, dict[str, int]] = {}
+
+    for user_id, predictions in special_by_user.items():
+        total_points = 0
+        knockout_points = 0
+
+        for prediction_type in global_prediction_types_for_lobby(lobby):
+            prediction = predictions.get(prediction_type)
+
+            if not isinstance(prediction, dict):
+                continue
+
+            if prediction_type in GLOBAL_PLACEMENT_TYPES:
+                total_points += score_global_placement_prediction(lobby, prediction_type, prediction, actual_placements)
+            elif prediction_type in {"topScorer", "goldenBall"}:
+                total_points += score_player_award_prediction(lobby, prediction_type, prediction, player_stats)
+
+        if lobby.point_system == "custom":
+            if is_custom_feature_enabled(lobby, "trackTeam"):
+                total_points += score_track_team_prediction(lobby, predictions.get("trackTeam"), matches)
+
+            if is_custom_feature_enabled(lobby, "favoritePlayer"):
+                total_points += score_favorite_player_prediction(lobby, predictions.get("favoritePlayer"), player_stats)
+
+            if is_custom_feature_enabled(lobby, "bracketHeavy"):
+                bracket_points = score_bracket_heavy_prediction(lobby, predictions.get("bracketHeavy"), matches)
+                total_points += bracket_points
+                knockout_points += bracket_points
+
+        points_by_user[user_id] = {"total": total_points, "knockoutStage": knockout_points}
+
+    return points_by_user
+
+
+def global_prediction_types_for_lobby(lobby: LobbyRecord) -> list[str]:
+    if lobby.point_system == "simple":
+        return ["champion", "runnerUp", "topScorer"]
+
+    if lobby.point_system == "regular":
+        return ["champion", "runnerUp", "thirdPlace", "fourthPlace", "topScorer", "goldenBall"]
+
+    if lobby.point_system != "custom":
+        return []
+
+    enabled = lobby.custom_settings.get("enabledFields") if lobby.custom_settings and isinstance(lobby.custom_settings.get("enabledFields"), dict) else {}
+
+    return [
+        prediction_type
+        for prediction_type in ["champion", "runnerUp", "thirdPlace", "fourthPlace", "topScorer", "goldenBall"]
+        if bool(enabled.get(prediction_type))
+    ]
+
+
+def score_global_placement_prediction(
+    lobby: LobbyRecord,
+    prediction_type: str,
+    prediction: dict[str, Any],
+    actual_placements: dict[str, str],
+) -> int:
+    selected_team = normalized_team(prediction.get("teamName"))
+    actual_team = normalized_team(actual_placements.get(prediction_type))
+
+    if not selected_team or selected_team != actual_team:
+        return 0
+
+    return points_for_global_type(lobby, prediction_type)
+
+
+def score_player_award_prediction(
+    lobby: LobbyRecord,
+    prediction_type: str,
+    prediction: dict[str, Any],
+    player_stats: list[PlayerStat],
+) -> int:
+    player = find_player_stat(player_stats, prediction)
+
+    if player is None:
+        return 0
+
+    if prediction_type == "topScorer" and player.is_top_scorer:
+        return points_for_global_type(lobby, "topScorer")
+
+    if prediction_type == "goldenBall" and player.is_golden_ball:
+        return points_for_global_type(lobby, "goldenBall")
+
+    return 0
+
+
+def score_favorite_player_prediction(
+    lobby: LobbyRecord,
+    raw_prediction: Any,
+    player_stats: list[PlayerStat],
+) -> int:
+    if not isinstance(raw_prediction, dict):
+        return 0
+
+    player = find_player_stat(player_stats, raw_prediction)
+
+    if player is None:
+        return 0
+
+    threshold = custom_points_value(lobby, "favoritePlayerContributions")
+    points_per_award = custom_points_value(lobby, "favoritePlayerPoints")
+
+    if threshold <= 0 or points_per_award <= 0:
+        return 0
+
+    return ((player.goals + player.assists) // threshold) * points_per_award
+
+
+def score_track_team_prediction(
+    lobby: LobbyRecord,
+    raw_prediction: Any,
+    matches: dict[int, FinishedMatch],
+) -> int:
+    if not isinstance(raw_prediction, dict) or not isinstance(raw_prediction.get("selections"), dict):
+        return 0
+
+    predicted_phase = str(raw_prediction["selections"].get("phase", ""))
+    actual_phase = tracked_team_actual_phase(lobby)
+
+    if not predicted_phase or predicted_phase != actual_phase:
+        return 0
+
+    return custom_points_value(lobby, "trackTeamPoints")
+
+
+def tracked_team_actual_phase(lobby: LobbyRecord) -> str:
+    tracked_team = normalized_team(lobby.custom_settings.get("trackedTeam") if lobby.custom_settings else "")
+
+    if not tracked_team:
+        return ""
+
+    country_results = load_country_results()
+
+    return country_results.get(tracked_team, "")
+
+
+def load_country_results() -> dict[str, str]:
+    try:
+        with open(COUNTRY_RESULTS_PATH, "r", encoding="utf-8") as results_file:
+            payload = json.load(results_file)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    countries = payload.get("countries") if isinstance(payload, dict) else None
+
+    if not isinstance(countries, list):
+        return {}
+
+    results: dict[str, str] = {}
+
+    for country in countries:
+        if not isinstance(country, dict):
+            continue
+
+        country_name = country.get("country")
+        reached_phase = country.get("reachedPhase")
+
+        if isinstance(country_name, str) and isinstance(reached_phase, str):
+            results[normalized_team(country_name)] = reached_phase
+
+    return results
+
+
+def score_bracket_heavy_prediction(
+    lobby: LobbyRecord,
+    raw_prediction: Any,
+    matches: dict[int, FinishedMatch],
+) -> int:
+    if not isinstance(raw_prediction, dict) or not isinstance(raw_prediction.get("selections"), dict):
+        return 0
+
+    selections = {
+        str(key): normalized_team(value)
+        for key, value in raw_prediction["selections"].items()
+        if isinstance(value, str)
+    }
+    points = 0
+
+    for stage, field in [
+        ("Last 32", "roundOf32"),
+        ("Last 16", "roundOf16"),
+        ("Quarter Finals", "quarterFinal"),
+        ("Semi Finals", "semiFinal"),
+        ("Third Place", "thirdPlaceMatch"),
+        ("Final", "final"),
+    ]:
+        if not is_custom_field_enabled(lobby, field):
+            continue
+
+        stage_points = custom_points_value(lobby, field)
+        stage_matches = sorted((match for match in matches.values() if match.stage == stage), key=lambda match: match.id)
+        selected_winners = bracket_selected_winners_for_stage(selections, stage)
+
+        for index, match in enumerate(stage_matches):
+            winner = normalized_team(match_winner(match))
+
+            if index < len(selected_winners) and selected_winners[index] == winner:
+                points += stage_points
+
+    return points
+
+
+def bracket_selected_winners_for_stage(selections: dict[str, str], stage: str) -> list[str]:
+    stage_entries: list[tuple[int, str, str]] = []
+
+    for key, selected in selections.items():
+        parts = key.split(":")
+
+        if len(parts) != 3 or parts[0] != stage:
+            continue
+
+        side = parts[1]
+
+        try:
+            index = int(parts[2])
+        except ValueError:
+            continue
+
+        side_rank = 0 if side == "left" else 1 if side == "right" else 2
+        stage_entries.append((side_rank, index, selected))
+
+    return [selected for _, _, selected in sorted(stage_entries)]
+
+
+def points_for_global_type(lobby: LobbyRecord, prediction_type: str) -> int:
+    if lobby.point_system == "simple":
+        return SIMPLE_GLOBAL_POINTS.get(to_scoring_key(prediction_type), 0)
+
+    if lobby.point_system == "regular":
+        return REGULAR_GLOBAL_POINTS.get(to_scoring_key(prediction_type), 0)
+
+    if lobby.point_system == "custom":
+        return custom_points_value(lobby, prediction_type)
+
+    return 0
+
+
+def custom_points_value(lobby: LobbyRecord, field: str) -> int:
+    values = lobby.custom_settings.get("values") if lobby.custom_settings and isinstance(lobby.custom_settings.get("values"), dict) else {}
+
+    try:
+        return max(0, int(values.get(field, 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def is_custom_feature_enabled(lobby: LobbyRecord, feature: str) -> bool:
+    enabled = lobby.custom_settings.get("enabledFeatures") if lobby.custom_settings and isinstance(lobby.custom_settings.get("enabledFeatures"), dict) else {}
+
+    return bool(enabled.get(feature))
+
+
+def is_custom_field_enabled(lobby: LobbyRecord, field: str) -> bool:
+    enabled = lobby.custom_settings.get("enabledFields") if lobby.custom_settings and isinstance(lobby.custom_settings.get("enabledFields"), dict) else {}
+
+    return bool(enabled.get(field))
+
+
+def actual_global_placements(matches: dict[int, FinishedMatch]) -> dict[str, str]:
+    placements: dict[str, str] = {}
+    final = next((match for match in matches.values() if match.stage == "Final"), None)
+    third_place = next((match for match in matches.values() if match.stage == "Third Place"), None)
+
+    if final:
+        placements["champion"] = match_winner(final)
+        placements["runnerUp"] = match_loser(final)
+
+    if third_place:
+        placements["thirdPlace"] = match_winner(third_place)
+        placements["fourthPlace"] = match_loser(third_place)
+
+    return placements
+
+
+def match_winner(match: FinishedMatch) -> str:
+    return match.home_team if match.home_score > match.away_score else match.away_team
+
+
+def match_loser(match: FinishedMatch) -> str:
+    return match.away_team if match.home_score > match.away_score else match.home_team
+
+
+def load_player_stats() -> list[PlayerStat]:
+    try:
+        with open(PLAYER_STATS_PATH, "r", encoding="utf-8") as player_file:
+            raw_players = json.load(player_file)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    if not isinstance(raw_players, list):
+        return []
+
+    players: list[PlayerStat] = []
+
+    for raw_player in raw_players:
+        if not isinstance(raw_player, dict):
+            continue
+
+        try:
+            number = int(raw_player.get("number", 0))
+            goals = max(0, int(raw_player.get("goals", 0)))
+            assists = max(0, int(raw_player.get("assists", 0)))
+        except (TypeError, ValueError):
+            continue
+
+        players.append(
+            PlayerStat(
+                country=str(raw_player.get("country", "")),
+                name=str(raw_player.get("name", "")),
+                number=number,
+                goals=goals,
+                assists=assists,
+                is_top_scorer=bool(raw_player.get("isTopScorer")),
+                is_golden_ball=bool(raw_player.get("isGoldenBall")),
+            )
+        )
+
+    return players
+
+
+def find_player_stat(players: list[PlayerStat], prediction: dict[str, Any]) -> PlayerStat | None:
+    selected_country = normalized_team(prediction.get("playerCountry"))
+    selected_name = normalized_team(prediction.get("playerName"))
+
+    try:
+        selected_number = int(prediction.get("playerNumber", 0))
+    except (TypeError, ValueError):
+        selected_number = 0
+
+    return next(
+        (
+            player
+            for player in players
+            if normalized_team(player.country) == selected_country
+            and normalized_team(player.name) == selected_name
+            and player.number == selected_number
+        ),
+        None,
+    )
+
+
+def normalized_team(value: Any) -> str:
+    normalized = unicodedata.normalize("NFD", str(value or "").strip())
+    return "".join(character for character in normalized if unicodedata.category(character) != "Mn").casefold()
+
+
+def to_scoring_key(prediction_type: str) -> str:
+    return {
+        "runnerUp": "runner_up",
+        "thirdPlace": "third_place",
+        "fourthPlace": "fourth_place",
+        "topScorer": "top_scorer",
+        "goldenBall": "golden_ball",
+    }.get(prediction_type, prediction_type)
 
 
 def match_result(score: ScorePrediction) -> str:
@@ -490,6 +947,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             self.save_lobby_prediction(path_parts[1], path_parts[3])
             return
 
+        if len(path_parts) == 4 and path_parts[0] == "lobbies" and path_parts[2] == "special-predictions":
+            self.save_lobby_special_prediction(path_parts[1], path_parts[3])
+            return
+
         if len(path_parts) == 3 and path_parts[0] == "predictions" and path_parts[1] == "default":
             self.save_default_prediction(path_parts[2])
             return
@@ -574,6 +1035,11 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     code=code,
                     requesting_user_id=int(authenticated_user["id"]),
                 )
+                special_predictions = list_lobby_special_predictions(
+                    connection,
+                    code=code,
+                    requesting_user_id=int(authenticated_user["id"]),
+                )
             except AuthenticationError as error:
                 self.send_json(401, {"code": "not_authenticated", "error": str(error)})
                 return
@@ -590,7 +1056,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             self.send_json(502, {"error": str(error)})
             return
 
-        self.send_json(200, build_scoreboard_payload(lobby, predictions, matches))
+        self.send_json(200, build_scoreboard_payload(lobby, predictions, matches, special_predictions))
 
     def list_default_predictions(self) -> None:
         with connect() as connection:
@@ -652,6 +1118,72 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
 
         self.send_json(200, {"prediction": self.match_prediction_payload(prediction)})
+
+    def save_lobby_special_prediction(self, code: str, prediction_type: str) -> None:
+        if prediction_type not in SPECIAL_PREDICTION_TYPES:
+            self.send_json(400, {"error": "Special prediction type is not supported."})
+            return
+
+        payload = self.read_json_body()
+
+        if payload is None:
+            self.send_json(400, {"error": "Request body must be valid JSON."})
+            return
+
+        raw_player_number = payload.get("playerNumber")
+        player_number: int | None = None
+
+        if raw_player_number is not None:
+            try:
+                player_number = int(raw_player_number)
+            except (TypeError, ValueError):
+                self.send_json(400, {"error": "Player number must be a number."})
+                return
+
+        raw_selections = payload.get("selections")
+        selections = None
+
+        if raw_selections is not None:
+            if not isinstance(raw_selections, dict):
+                self.send_json(400, {"error": "Selections must be an object."})
+                return
+
+            selections = {
+                str(key): str(value)
+                for key, value in raw_selections.items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                authenticated_user = self.get_authenticated_user()
+                prediction = save_special_prediction(
+                    connection,
+                    code=code,
+                    user_id=int(authenticated_user["id"]),
+                    prediction_type=prediction_type,
+                    team_name=payload.get("teamName") if isinstance(payload.get("teamName"), str) else None,
+                    player_country=payload.get("playerCountry") if isinstance(payload.get("playerCountry"), str) else None,
+                    player_name=payload.get("playerName") if isinstance(payload.get("playerName"), str) else None,
+                    player_number=player_number,
+                    selections=selections,
+                )
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+                return
+
+        self.send_json(200, {"prediction": self.special_prediction_payload(prediction)})
 
     def save_default_prediction(self, match_id_text: str) -> None:
         try:
@@ -923,6 +1455,18 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             "matchId": prediction.match_id,
             "homeScore": prediction.home_score,
             "awayScore": prediction.away_score,
+        }
+
+    def special_prediction_payload(self, prediction: Any) -> dict[str, Any]:
+        return {
+            "userId": prediction.user_id,
+            "username": prediction.username,
+            "type": prediction.prediction_type,
+            "teamName": prediction.team_name,
+            "playerCountry": prediction.player_country,
+            "playerName": prediction.player_name,
+            "playerNumber": prediction.player_number,
+            "selections": prediction.selections,
         }
 
 

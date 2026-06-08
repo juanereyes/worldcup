@@ -78,6 +78,7 @@ type CustomNumericFieldId =
   | "fourthPlace"
   | "topScorer"
   | "goldenBall"
+  | "trackTeamPoints"
   | "favoritePlayerContributions"
   | "favoritePlayerPoints"
   | "roundOf32"
@@ -256,6 +257,12 @@ type TrackTeamModalState = {
   searchQuery: string;
 };
 
+type TrackTeamPredictionModalState = {
+  isOpen: boolean;
+  lobby: Lobby | null;
+  selectedPhase: string;
+};
+
 type ChooseTeamModalState = {
   isOpen: boolean;
   lobby: Lobby | null;
@@ -354,6 +361,7 @@ type Copy = {
     myPredictions: string;
     globalPredictions: string;
     chooseGlobalPrediction: (prediction: string) => string;
+    chooseTrackTeamPhase: (country: string) => string;
     choosePlayerPrediction: (prediction: string) => string;
     chooseCountry: string;
     choosePlayer: string;
@@ -532,6 +540,7 @@ const defaultCustomSettingValues: Record<CustomNumericFieldId, string> = {
   fourthPlace: "6",
   topScorer: "10",
   goldenBall: "8",
+  trackTeamPoints: "5",
   favoritePlayerContributions: "3",
   favoritePlayerPoints: "5",
   roundOf32: "2",
@@ -553,6 +562,7 @@ const defaultCustomEnabledFields: Record<CustomNumericFieldId, boolean> = {
   fourthPlace: true,
   topScorer: true,
   goldenBall: true,
+  trackTeamPoints: true,
   favoritePlayerContributions: true,
   favoritePlayerPoints: true,
   roundOf32: true,
@@ -612,6 +622,11 @@ let trackTeamModal: TrackTeamModalState = {
   selectedTeam: "",
   isMenuOpen: false,
   searchQuery: ""
+};
+let trackTeamPredictionModal: TrackTeamPredictionModalState = {
+  isOpen: false,
+  lobby: null,
+  selectedPhase: ""
 };
 let chooseTeamModal: ChooseTeamModalState = {
   isOpen: false,
@@ -967,6 +982,7 @@ const copy: Record<Language, Copy> = {
       myPredictions: "My predictions",
       globalPredictions: "Global predictions",
       chooseGlobalPrediction: (prediction) => `Choose the ${prediction} of the competition.`,
+      chooseTrackTeamPhase: (country) => `Choose how far will ${country} make it in the competition.`,
       choosePlayerPrediction: (prediction) => `Choose the ${prediction} of the competition.`,
       chooseCountry: "Choose a country",
       choosePlayer: "Choose a player",
@@ -1165,6 +1181,7 @@ const copy: Record<Language, Copy> = {
         fourthPlace: "Fourth place",
         topScorer: "Top scorer",
         goldenBall: "Golden Ball",
+        trackTeamPoints: "Track a team correct phase",
         favoritePlayerContributions: "Goal contributions per award",
         favoritePlayerPoints: "Points per award",
         roundOf32: "Round of 32",
@@ -1312,6 +1329,7 @@ const copy: Record<Language, Copy> = {
       myPredictions: "Mis pronósticos",
       globalPredictions: "Pronósticos globales",
       chooseGlobalPrediction: (prediction) => `Elige el ${prediction} de la competición.`,
+      chooseTrackTeamPhase: (country) => `Elige hasta dónde llegará ${country} en la competición.`,
       choosePlayerPrediction: (prediction) => `Elige el ${prediction} de la competición.`,
       chooseCountry: "Elige un país",
       choosePlayer: "Elige un jugador",
@@ -1510,6 +1528,7 @@ const copy: Record<Language, Copy> = {
         fourthPlace: "Cuarto lugar",
         topScorer: "Goleador",
         goldenBall: "Balón de Oro",
+        trackTeamPoints: "Fase correcta en Sigue un equipo",
         favoritePlayerContributions: "Contribuciones de gol por premio",
         favoritePlayerPoints: "Puntos por premio",
         roundOf32: "Ronda de 32",
@@ -1684,6 +1703,8 @@ const getGlobalPlacementPredictionsStorageKey = (lobby: Lobby) =>
   `worldcup-global-placement-predictions-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
 const getChooseTeamStorageKey = (lobby: Lobby) =>
   `worldcup-choose-team-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
+const getTrackTeamPredictionStorageKey = (lobby: Lobby) =>
+  `worldcup-track-team-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
 const getPlayerPredictionsStorageKey = (lobby: Lobby) =>
   `worldcup-player-predictions-${lobby.code}-${currentUser?.id ?? "anonymous"}`;
 const getBracketHeavySelectionsStorageKey = (lobby: Lobby) =>
@@ -1727,6 +1748,13 @@ const getStoredChooseTeam = (lobby: Lobby) => window.localStorage.getItem(getCho
 
 const saveStoredChooseTeam = (lobby: Lobby, teamName: string) => {
   window.localStorage.setItem(getChooseTeamStorageKey(lobby), teamName);
+};
+
+const getStoredTrackTeamPrediction = (lobby: Lobby) =>
+  window.localStorage.getItem(getTrackTeamPredictionStorageKey(lobby)) ?? "";
+
+const saveStoredTrackTeamPrediction = (lobby: Lobby, phase: string) => {
+  window.localStorage.setItem(getTrackTeamPredictionStorageKey(lobby), phase);
 };
 
 const isPlayerPredictionId = (predictionId: CustomNumericFieldId | CustomFeatureId): predictionId is PlayerPredictionId =>
@@ -1810,6 +1838,28 @@ const saveStoredBracketHeavySelections = (lobby: Lobby, selections: Record<strin
   window.localStorage.setItem(getBracketHeavySelectionsStorageKey(lobby), JSON.stringify(selections));
 };
 
+const saveSpecialPrediction = async (
+  lobby: Lobby,
+  predictionType: GlobalPlacementPredictionId | PlayerPredictionId | "chooseTeam" | "trackTeam" | "bracketHeavy",
+  payload: Record<string, unknown>
+) => {
+  const response = await fetch(
+    `${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}/special-predictions/${encodeURIComponent(predictionType)}`,
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Could not save special prediction.");
+  }
+};
+
 const matchSpecificCustomFields: CustomNumericFieldId[] = [
   "exactScore",
   "resultGoalDifference",
@@ -1826,6 +1876,7 @@ const globalCustomFields: CustomNumericFieldId[] = [
   "goldenBall"
 ];
 const globalPlacementFields: GlobalPlacementPredictionId[] = ["champion", "runnerUp", "thirdPlace", "fourthPlace"];
+const trackTeamCustomFields: CustomNumericFieldId[] = ["trackTeamPoints"];
 const favoritePlayerCustomFields: CustomNumericFieldId[] = ["favoritePlayerContributions", "favoritePlayerPoints"];
 const bracketHeavyCustomFields: CustomNumericFieldId[] = [
   "roundOf32",
@@ -1975,6 +2026,7 @@ const stageDisplayLabels: Record<string, string> = {
 
 const stageTranslations: Partial<Record<Language, Record<string, string>>> = {
   es: {
+    "Group Stage": "Fase de grupos",
     "Last 32": "Dieciseisavos de final",
     "Last 16": "Octavos de final",
     "Quarter Finals": "Cuartos de final",
@@ -1992,12 +2044,12 @@ const localizeMatchLabel = (label: string | null, language: Language) => {
     return "";
   }
 
-  if (language === "es" && label.startsWith("Group ")) {
-    return label.replace("Group", "Grupo");
-  }
-
   if (language === "es" && label === "Group Stage") {
     return "Fase de grupos";
+  }
+
+  if (language === "es" && label.startsWith("Group ")) {
+    return label.replace("Group", "Grupo");
   }
 
   return localizeStageLabel(label, language);
@@ -2011,6 +2063,7 @@ const knockoutStageOrder = [
   "Third Place",
   "Final"
 ];
+const trackTeamPhaseOptions = ["Group Stage", ...knockoutStageOrder];
 
 const getKnockoutMatches = () =>
   allMatches
@@ -2174,7 +2227,7 @@ const renderCustomFeatureRules = (selectedCopy: Copy, language: Language, lobby:
       : selectedCopy.customSettingsPage.trackedTeamPlaceholder;
 
     featureItems.push(
-      `<li><span>${selectedCopy.customSettingsPage.features.trackTeam.label}: ${trackedTeam}</span><p>${selectedCopy.customSettingsPage.features.trackTeam.detail}</p></li>`
+      `<li><span>${selectedCopy.customSettingsPage.features.trackTeam.label}: ${trackedTeam}</span><p>${selectedCopy.customSettingsPage.features.trackTeam.detail}</p><strong>${selectedCopy.customSettingsPage.fields.trackTeamPoints}: ${formatRulePoints(getCustomRuleValue(lobby, "trackTeamPoints"))}</strong></li>`
     );
   }
 
@@ -2351,17 +2404,20 @@ const renderCustomFeatureButtons = (selectedCopy: Copy, language: Language, lobb
             ? getStoredChooseTeam(lobby)
             : null;
       const selectedPlayer = feature === "favoritePlayer" ? getStoredPlayerPredictions(lobby).favoritePlayer : null;
+      const selectedPhase = feature === "trackTeam" ? getStoredTrackTeamPrediction(lobby) : "";
 
       return `
         <button
           class="secondary-action compact-secondary-action global-prediction-option"
           type="button"
           ${feature === "chooseTeam" ? `data-choose-team-lobby="${lobby.code}"` : ""}
+          ${feature === "trackTeam" ? `data-track-team-prediction-lobby="${lobby.code}"` : ""}
           ${feature === "favoritePlayer" ? `data-player-prediction="favoritePlayer" data-player-prediction-lobby="${lobby.code}"` : ""}
           ${feature === "bracketHeavy" ? `data-bracket-heavy-lobby="${lobby.code}"` : ""}
         >
           <span>${selectedCopy.customSettingsPage.features[feature].label}</span>
           ${selectedTeam ? renderTeamBadge(selectedTeam, language) : ""}
+          ${selectedPhase ? `<span class="player-prediction-choice">${localizeMatchLabel(selectedPhase, language)}</span>` : ""}
           ${selectedPlayer ? `<span class="player-prediction-choice">#${selectedPlayer.number} ${escapeHtml(selectedPlayer.name)}</span>` : ""}
         </button>
       `;
@@ -3444,7 +3500,12 @@ const renderCustomSettingsPage = (selectedCopy: Copy, language: Language) => {
                     ${renderCustomFeatureHeader(selectedCopy, "trackTeam")}
                     ${
                       customSettingsState.enabledFeatures.trackTeam
-                        ? renderTrackedTeamDropdown(selectedCopy, language)
+                        ? `<div class="custom-settings-list compact-custom-list">
+                            ${renderTrackedTeamDropdown(selectedCopy, language)}
+                            ${trackTeamCustomFields
+                              .map((field) => renderCustomNumberField(selectedCopy, field, { toggleable: false }))
+                              .join("")}
+                          </div>`
                         : ""
                     }
                   </div>
@@ -3907,6 +3968,57 @@ const renderTrackTeamModal = (selectedCopy: Copy, language: Language) => {
             ${selectedCopy.leaveLobby.cancel}
           </button>
           <button class="primary-action" type="button" id="track-team-confirm" ${trackTeamModal.selectedTeam ? "" : "disabled"}>
+            ${selectedCopy.lobbyPage.confirmGlobalPrediction}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
+const renderTrackTeamPredictionModal = (selectedCopy: Copy, language: Language) => {
+  if (!trackTeamPredictionModal.isOpen || !trackTeamPredictionModal.lobby) {
+    return "";
+  }
+
+  const trackedTeam = trackTeamPredictionModal.lobby.customSettings?.trackedTeam ?? "";
+  const trackedTeamDisplay = trackedTeam
+    ? getTeamDisplayName(trackedTeam, language)
+    : selectedCopy.customSettingsPage.trackedTeamLabel;
+
+  return `
+    <div class="modal-backdrop" role="presentation" id="track-team-prediction-backdrop">
+      <section class="join-lobby-modal global-placement-modal" role="dialog" aria-modal="true" aria-labelledby="track-team-prediction-title">
+        <div class="modal-header">
+          <h2 id="track-team-prediction-title">${selectedCopy.customSettingsPage.features.trackTeam.label}</h2>
+          <button class="modal-close" type="button" id="track-team-prediction-close" aria-label="${selectedCopy.leaveLobby.cancel}">
+            &times;
+          </button>
+        </div>
+        <p class="leave-lobby-body choose-team-description">${selectedCopy.customSettingsPage.features.trackTeam.detail}</p>
+        <div class="tracked-team-control global-placement-country-control">
+          <span>${selectedCopy.lobbyPage.chooseTrackTeamPhase(trackedTeamDisplay)}</span>
+          <div class="tracked-team-menu phase-choice-menu" id="track-team-phase-menu">
+            ${trackTeamPhaseOptions
+              .map(
+                (phase) => `
+                  <button
+                    type="button"
+                    data-track-team-phase="${phase}"
+                    aria-current="${trackTeamPredictionModal.selectedPhase === phase ? "true" : "false"}"
+                  >
+                    <span>${localizeMatchLabel(phase, language)}</span>
+                  </button>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="track-team-prediction-cancel">
+            ${selectedCopy.leaveLobby.cancel}
+          </button>
+          <button class="primary-action" type="button" id="track-team-prediction-confirm" ${trackTeamPredictionModal.selectedPhase ? "" : "disabled"}>
             ${selectedCopy.lobbyPage.confirmGlobalPrediction}
           </button>
         </div>
@@ -4402,6 +4514,7 @@ const render = (language: Language) => {
   ${renderPredictionCopyModal(selectedCopy)}
   ${renderGlobalPlacementPredictionModal(selectedCopy, language)}
   ${renderTrackTeamModal(selectedCopy, language)}
+  ${renderTrackTeamPredictionModal(selectedCopy, language)}
   ${renderChooseTeamModal(selectedCopy, language)}
   ${renderPlayerPredictionModal(selectedCopy, language)}
   ${renderBracketHeavyModal(selectedCopy, language)}
@@ -4479,6 +4592,12 @@ const render = (language: Language) => {
   const trackTeamModalMenu = document.querySelector<HTMLDivElement>("#track-team-modal-menu");
   const trackTeamSearchInput = document.querySelector<HTMLInputElement>("#track-team-search");
   const trackTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-track-team]");
+  const trackTeamPredictionButtons = document.querySelectorAll<HTMLButtonElement>("[data-track-team-prediction-lobby]");
+  const trackTeamPredictionBackdrop = document.querySelector<HTMLDivElement>("#track-team-prediction-backdrop");
+  const trackTeamPredictionCloseButton = document.querySelector<HTMLButtonElement>("#track-team-prediction-close");
+  const trackTeamPredictionCancelButton = document.querySelector<HTMLButtonElement>("#track-team-prediction-cancel");
+  const trackTeamPredictionConfirmButton = document.querySelector<HTMLButtonElement>("#track-team-prediction-confirm");
+  const trackTeamPhaseButtons = document.querySelectorAll<HTMLButtonElement>("[data-track-team-phase]");
   const chooseTeamButtons = document.querySelectorAll<HTMLButtonElement>("[data-choose-team-lobby]");
   const chooseTeamBackdrop = document.querySelector<HTMLDivElement>("#choose-team-backdrop");
   const chooseTeamCloseButton = document.querySelector<HTMLButtonElement>("#choose-team-close");
@@ -4817,12 +4936,17 @@ const render = (language: Language) => {
       return;
     }
 
+    const lobby = currentLobby;
+    const predictionId = globalPlacementPredictionModal.predictionId;
+    const selectedTeam = globalPlacementPredictionModal.selectedTeam;
+
     saveStoredGlobalPlacementPrediction(
-      currentLobby,
-      globalPlacementPredictionModal.predictionId,
-      globalPlacementPredictionModal.selectedTeam
+      lobby,
+      predictionId,
+      selectedTeam
     );
     closeGlobalPlacementPredictionModal();
+    void saveSpecialPrediction(lobby, predictionId, { teamName: selectedTeam });
   });
 
   if (globalPlacementPredictionModal.isMenuOpen) {
@@ -5029,6 +5153,63 @@ const render = (language: Language) => {
     );
   }
 
+  const closeTrackTeamPredictionModal = () => {
+    trackTeamPredictionModal = {
+      isOpen: false,
+      lobby: null,
+      selectedPhase: ""
+    };
+    render(getStoredLanguage());
+  };
+
+  trackTeamPredictionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const lobby = currentLobby?.code === button.dataset.trackTeamPredictionLobby ? currentLobby : null;
+
+      if (!lobby) {
+        return;
+      }
+
+      trackTeamPredictionModal = {
+        isOpen: true,
+        lobby,
+        selectedPhase: getStoredTrackTeamPrediction(lobby)
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  trackTeamPredictionCloseButton?.addEventListener("click", closeTrackTeamPredictionModal);
+  trackTeamPredictionCancelButton?.addEventListener("click", closeTrackTeamPredictionModal);
+  trackTeamPredictionBackdrop?.addEventListener("click", (event) => {
+    if (event.target === trackTeamPredictionBackdrop) {
+      closeTrackTeamPredictionModal();
+    }
+  });
+
+  trackTeamPhaseButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      trackTeamPredictionModal = {
+        ...trackTeamPredictionModal,
+        selectedPhase: button.dataset.trackTeamPhase ?? ""
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  trackTeamPredictionConfirmButton?.addEventListener("click", () => {
+    if (!trackTeamPredictionModal.lobby || !trackTeamPredictionModal.selectedPhase) {
+      return;
+    }
+
+    const lobby = trackTeamPredictionModal.lobby;
+    const selectedPhase = trackTeamPredictionModal.selectedPhase;
+
+    saveStoredTrackTeamPrediction(lobby, selectedPhase);
+    closeTrackTeamPredictionModal();
+    void saveSpecialPrediction(lobby, "trackTeam", { selections: { phase: selectedPhase } });
+  });
+
   const closeChooseTeamModal = () => {
     chooseTeamModal = {
       isOpen: false,
@@ -5117,8 +5298,12 @@ const render = (language: Language) => {
       return;
     }
 
-    saveStoredChooseTeam(chooseTeamModal.lobby, chooseTeamModal.selectedTeam);
+    const lobby = chooseTeamModal.lobby;
+    const selectedTeam = chooseTeamModal.selectedTeam;
+
+    saveStoredChooseTeam(lobby, selectedTeam);
     closeChooseTeamModal();
+    void saveSpecialPrediction(lobby, "chooseTeam", { teamName: selectedTeam });
   });
 
   if (chooseTeamModal.isMenuOpen) {
@@ -5308,12 +5493,21 @@ const render = (language: Language) => {
       return;
     }
 
-    saveStoredPlayerPrediction(playerPredictionModal.lobby, playerPredictionModal.predictionId, {
+    const lobby = playerPredictionModal.lobby;
+    const predictionId = playerPredictionModal.predictionId;
+    const selection = {
       country: playerPredictionModal.selectedCountry,
       name: playerPredictionModal.selectedPlayerName,
       number: playerPredictionModal.selectedPlayerNumber
-    });
+    };
+
+    saveStoredPlayerPrediction(lobby, predictionId, selection);
     closePlayerPredictionModal();
+    void saveSpecialPrediction(lobby, predictionId, {
+      playerCountry: selection.country,
+      playerName: selection.name,
+      playerNumber: selection.number
+    });
   });
 
   if (playerPredictionModal.isCountryMenuOpen || playerPredictionModal.isPlayerMenuOpen) {
@@ -5380,7 +5574,9 @@ const render = (language: Language) => {
         nextSelections[matchKey] = teamName;
       }
 
-      saveStoredBracketHeavySelections(currentLobby, getValidBracketHeavySelections(nextSelections));
+      const validSelections = getValidBracketHeavySelections(nextSelections);
+      saveStoredBracketHeavySelections(currentLobby, validSelections);
+      void saveSpecialPrediction(currentLobby, "bracketHeavy", { selections: validSelections });
       render(getStoredLanguage());
     });
   });
@@ -5956,6 +6152,7 @@ const copyDefaultPredictionsToSelectedLobby = async (scope: "all" | "phase", sel
 const getRequiredCustomFields = () => [
   ...matchSpecificCustomFields,
   ...globalCustomFields,
+  ...(customSettingsState.enabledFeatures.trackTeam ? trackTeamCustomFields : []),
   ...(customSettingsState.enabledFeatures.favoritePlayer ? favoritePlayerCustomFields : []),
   ...(customSettingsState.enabledFeatures.bracketHeavy ? bracketHeavyCustomFields : [])
 ];
@@ -5964,7 +6161,8 @@ const areCustomSettingsValid = () => {
   const requiredFields = getRequiredCustomFields();
   const hasInvalidNumber = requiredFields.some((field) => {
     const isRequiredByFeature =
-      customSettingsState.enabledFeatures.favoritePlayer && favoritePlayerCustomFields.includes(field);
+      (customSettingsState.enabledFeatures.trackTeam && trackTeamCustomFields.includes(field)) ||
+      (customSettingsState.enabledFeatures.favoritePlayer && favoritePlayerCustomFields.includes(field));
     const shouldValidate = isRequiredByFeature || customSettingsState.enabledFields[field];
 
     return shouldValidate && !isNonNegativeIntegerValue(customSettingsState.values[field]);
