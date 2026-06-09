@@ -33,9 +33,6 @@ type AuthCopy = {
   alternatePrompt: string;
   alternateAction: string;
   passwordGuidance: string;
-  serviceLabel: string;
-  serviceHeading: string;
-  serviceSummary: string;
   serviceUnavailable: string;
   passwordIncomplete: string;
   genericSignInError: string;
@@ -110,9 +107,6 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       alternatePrompt: "New to World Cup Picks?",
       alternateAction: "Create an account",
       passwordGuidance: "Password must include:",
-      serviceLabel: "Auth Service",
-      serviceHeading: "Separate client and Python API",
-      serviceSummary: "New users are stored in this service's SQLite database with unique usernames and emails.",
       serviceUnavailable: "Auth service is not running. Start the backend and try again.",
       passwordIncomplete: "Please complete all password requirements.",
       genericSignInError: "Could not sign in.",
@@ -143,9 +137,6 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       alternatePrompt: "Already have an account?",
       alternateAction: "Sign in",
       passwordGuidance: "Password must include:",
-      serviceLabel: "Auth Service",
-      serviceHeading: "Separate client and Python API",
-      serviceSummary: "New users are stored in this service's SQLite database with unique usernames and emails.",
       serviceUnavailable: "Auth service is not running. Start the backend and try again.",
       passwordIncomplete: "Please complete all password requirements.",
       genericSignInError: "Could not sign in.",
@@ -178,9 +169,6 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       alternatePrompt: "¿Nuevo en World Cup Picks?",
       alternateAction: "Crear una cuenta",
       passwordGuidance: "La contraseña debe incluir:",
-      serviceLabel: "Servicio de autenticación",
-      serviceHeading: "Cliente separado y API en Python",
-      serviceSummary: "Los usuarios nuevos se guardan en la base SQLite de este servicio con usuarios y correos únicos.",
       serviceUnavailable: "El servicio de autenticación no está corriendo. Inicia el backend e inténtalo de nuevo.",
       passwordIncomplete: "Completa todos los requisitos de la contraseña.",
       genericSignInError: "No se pudo iniciar sesión.",
@@ -211,9 +199,6 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       alternatePrompt: "¿Ya tienes una cuenta?",
       alternateAction: "Iniciar sesión",
       passwordGuidance: "La contraseña debe incluir:",
-      serviceLabel: "Servicio de autenticación",
-      serviceHeading: "Cliente separado y API en Python",
-      serviceSummary: "Los usuarios nuevos se guardan en la base SQLite de este servicio con usuarios y correos únicos.",
       serviceUnavailable: "El servicio de autenticación no está corriendo. Inicia el backend e inténtalo de nuevo.",
       passwordIncomplete: "Completa todos los requisitos de la contraseña.",
       genericSignInError: "No se pudo iniciar sesión.",
@@ -412,12 +397,6 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
             <button type="button" data-mode="${alternateMode}">${copy.alternateAction}</button>
           </p>
         </div>
-
-        <aside class="service-card" aria-label="${copy.serviceLabel}">
-          <span>${copy.serviceLabel}</span>
-          <strong>${copy.serviceHeading}</strong>
-          <p>${copy.serviceSummary}</p>
-        </aside>
       </section>
     </section>
   `;

@@ -172,15 +172,13 @@ img {
 
 .auth-layout {
   display: grid;
-  gap: 42px;
-  grid-template-columns: minmax(0, 520px) minmax(280px, 380px);
+  grid-template-columns: minmax(0, 520px);
   justify-content: center;
   margin: 86px auto 0;
   max-width: 1120px;
 }
 
-.auth-panel,
-.service-card {
+.auth-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -421,33 +419,6 @@ h1 {
   padding: 0;
 }
 
-.service-card {
-  align-self: start;
-  padding: 24px;
-}
-
-.service-card span {
-  color: var(--red);
-  display: block;
-  font-size: 0.82rem;
-  font-weight: 850;
-  margin-bottom: 12px;
-  text-transform: uppercase;
-}
-
-.service-card strong {
-  color: var(--green-dark);
-  display: block;
-  font-size: 1.35rem;
-  line-height: 1.2;
-}
-
-.service-card p {
-  color: var(--muted);
-  line-height: 1.55;
-  margin: 16px 0 0;
-}
-
 @media (max-width: 840px) {
   .auth-shell {
     padding: 18px;
@@ -456,10 +427,6 @@ h1 {
   .auth-layout {
     grid-template-columns: 1fr;
     margin-top: 56px;
-  }
-
-  .service-card {
-    max-width: 520px;
   }
 }
 
