@@ -52,9 +52,32 @@ from lobby_service.scoring import (
     score_simple_match_prediction,
 )
 
-HOST = "127.0.0.1"
-PORT = 8003
-ALLOWED_ORIGINS = {"http://127.0.0.1:5173"}
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = "8003"
+DEFAULT_ALLOWED_ORIGINS = ("http://127.0.0.1:5173",)
+
+
+def get_host() -> str:
+    return os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else DEFAULT_HOST)
+
+
+def get_port() -> int:
+    return int(os.environ.get("PORT", DEFAULT_PORT))
+
+
+def get_allowed_origins() -> tuple[str, ...]:
+    configured_origins = os.environ.get("ALLOWED_ORIGINS")
+
+    if not configured_origins:
+        return DEFAULT_ALLOWED_ORIGINS
+
+    origins = tuple(
+        origin.strip().rstrip("/")
+        for origin in configured_origins.split(",")
+        if origin.strip()
+    )
+    return origins or DEFAULT_ALLOWED_ORIGINS
+
 AUTH_SESSION_URL = os.environ.get("AUTH_SESSION_URL", "http://127.0.0.1:8001/session")
 MATCHES_URL = os.environ.get("MATCHES_URL", "http://127.0.0.1:8002/matches")
 BOGOTA_TZ = ZoneInfo("America/Bogota")
@@ -1619,8 +1642,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(response)
 
     def send_cors_headers(self) -> None:
+        allowed_origins = get_allowed_origins()
         origin = self.headers.get("Origin")
-        allowed_origin = origin if origin in ALLOWED_ORIGINS else "http://127.0.0.1:5173"
+        normalized_origin = origin.rstrip("/") if origin else None
+        allowed_origin = normalized_origin if normalized_origin in allowed_origins else allowed_origins[0]
 
         self.send_header("Access-Control-Allow-Origin", allowed_origin)
         self.send_header("Access-Control-Allow-Credentials", "true")
@@ -1670,8 +1695,10 @@ def run() -> None:
     with connect() as connection:
         initialize_database(connection)
 
-    server = ThreadingHTTPServer((HOST, PORT), LobbyRequestHandler)
-    print(f"Lobby service listening on http://{HOST}:{PORT}")
+    host = get_host()
+    port = get_port()
+    server = ThreadingHTTPServer((host, port), LobbyRequestHandler)
+    print(f"Lobby service listening on http://{host}:{port}")
     server.serve_forever()
 
 

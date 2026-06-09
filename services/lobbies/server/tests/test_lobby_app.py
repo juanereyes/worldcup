@@ -12,6 +12,9 @@ from app import (
     MatchSchedule,
     bracket_heavy_window_state,
     build_scoreboard_payload,
+    get_allowed_origins,
+    get_host,
+    get_port,
     global_prediction_closes_at,
     validate_auth_session,
 )
@@ -58,6 +61,29 @@ class LobbyAuthValidationTest(unittest.TestCase):
         with patch("app.urlopen", side_effect=error):
             with self.assertRaises(AuthenticationError):
                 validate_auth_session("worldcup_auth_session=bad-token")
+
+
+class LobbyDeploymentConfigTest(unittest.TestCase):
+    def test_local_host_and_port_are_the_default_without_render_port(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(get_host(), "127.0.0.1")
+            self.assertEqual(get_port(), 8003)
+
+    def test_render_port_switches_default_host_to_public_binding(self) -> None:
+        with patch.dict("os.environ", {"PORT": "10000"}, clear=True):
+            self.assertEqual(get_host(), "0.0.0.0")
+            self.assertEqual(get_port(), 10000)
+
+    def test_allowed_origins_can_be_configured_from_environment(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ALLOWED_ORIGINS": "https://app.example.com, https://preview.example.com/"},
+            clear=True,
+        ):
+            self.assertEqual(
+                get_allowed_origins(),
+                ("https://app.example.com", "https://preview.example.com"),
+            )
 
 
 class PredictionTimingTest(unittest.TestCase):

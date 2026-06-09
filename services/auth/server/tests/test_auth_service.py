@@ -3,9 +3,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from argon2 import PasswordHasher
 
+from app import get_allowed_origins, get_cookie_secure, get_host, get_port, session_cookie_attributes
 from auth_service.database import (
     DuplicateUserError,
     InvalidCredentialsError,
@@ -161,6 +163,45 @@ class AuthServiceTest(unittest.TestCase):
         delete_session(self.connection, session.token)
 
         self.assertIsNone(get_user_for_session(self.connection, session.token))
+
+
+class AuthDeploymentConfigTest(unittest.TestCase):
+    def test_local_host_and_port_are_the_default_without_render_port(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(get_host(), "127.0.0.1")
+            self.assertEqual(get_port(), 8001)
+
+    def test_render_port_switches_default_host_to_public_binding(self) -> None:
+        with patch.dict("os.environ", {"PORT": "10000"}, clear=True):
+            self.assertEqual(get_host(), "0.0.0.0")
+            self.assertEqual(get_port(), 10000)
+
+    def test_allowed_origins_can_be_configured_from_environment(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ALLOWED_ORIGINS": "https://app.example.com, https://auth.example.com/"},
+            clear=True,
+        ):
+            self.assertEqual(
+                get_allowed_origins(),
+                ("https://app.example.com", "https://auth.example.com"),
+            )
+
+    def test_local_cookie_defaults_do_not_require_secure_domain_cookie(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(get_cookie_secure())
+            self.assertEqual(
+                session_cookie_attributes(max_age=60),
+                "Max-Age=60; Path=/; HttpOnly; SameSite=Lax",
+            )
+
+    def test_production_cookie_can_target_shared_domain(self) -> None:
+        with patch.dict("os.environ", {"AUTH_COOKIE_DOMAIN": ".picks-football.com"}, clear=True):
+            self.assertTrue(get_cookie_secure())
+            self.assertEqual(
+                session_cookie_attributes(max_age=60),
+                "Max-Age=60; Path=/; HttpOnly; SameSite=Lax; Domain=.picks-football.com; Secure",
+            )
 
 
 if __name__ == "__main__":

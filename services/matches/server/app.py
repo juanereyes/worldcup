@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,10 +17,32 @@ from matches_service.football_data import (
 )
 
 
-HOST = "127.0.0.1"
-PORT = 8002
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = "8002"
+DEFAULT_ALLOWED_ORIGINS = ("*",)
 ROOT_DIR = Path(__file__).resolve().parents[3]
 
+
+def get_host() -> str:
+    return os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else DEFAULT_HOST)
+
+
+def get_port() -> int:
+    return int(os.environ.get("PORT", DEFAULT_PORT))
+
+
+def get_allowed_origins() -> tuple[str, ...]:
+    configured_origins = os.environ.get("ALLOWED_ORIGINS")
+
+    if not configured_origins:
+        return DEFAULT_ALLOWED_ORIGINS
+
+    origins = tuple(
+        origin.strip().rstrip("/")
+        for origin in configured_origins.split(",")
+        if origin.strip()
+    )
+    return origins or DEFAULT_ALLOWED_ORIGINS
 
 class MatchesRequestHandler(BaseHTTPRequestHandler):
     server_version = "WorldCupMatches/0.1"
@@ -75,15 +98,26 @@ class MatchesRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(response)
 
     def send_cors_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        allowed_origins = get_allowed_origins()
+        origin = self.headers.get("Origin")
+        normalized_origin = origin.rstrip("/") if origin else None
+        allowed_origin = (
+            "*"
+            if "*" in allowed_origins
+            else normalized_origin if normalized_origin in allowed_origins else allowed_origins[0]
+        )
+
+        self.send_header("Access-Control-Allow-Origin", allowed_origin)
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
 
 def run() -> None:
     load_env_file(ROOT_DIR / ".env")
-    server = ThreadingHTTPServer((HOST, PORT), MatchesRequestHandler)
-    print(f"Matches service listening on http://{HOST}:{PORT}")
+    host = get_host()
+    port = get_port()
+    server = ThreadingHTTPServer((host, port), MatchesRequestHandler)
+    print(f"Matches service listening on http://{host}:{port}")
     server.serve_forever()
 
 

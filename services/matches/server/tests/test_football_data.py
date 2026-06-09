@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from app import get_allowed_origins, get_host, get_port
 from matches_service import football_data
 from matches_service.football_data import select_carousel_matches
 
@@ -14,6 +15,28 @@ def match(match_id: int, utc_date: str) -> dict:
         "awayTeam": {"name": "B"},
         "score": {"fullTime": {"home": None, "away": None}},
     }
+
+
+def test_local_host_and_port_are_the_default_without_render_port(monkeypatch) -> None:
+    monkeypatch.delenv("HOST", raising=False)
+    monkeypatch.delenv("PORT", raising=False)
+
+    assert get_host() == "127.0.0.1"
+    assert get_port() == 8002
+
+
+def test_render_port_switches_default_host_to_public_binding(monkeypatch) -> None:
+    monkeypatch.delenv("HOST", raising=False)
+    monkeypatch.setenv("PORT", "10000")
+
+    assert get_host() == "0.0.0.0"
+    assert get_port() == 10000
+
+
+def test_allowed_origins_can_be_configured_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example.com, https://preview.example.com/")
+
+    assert get_allowed_origins() == ("https://app.example.com", "https://preview.example.com")
 
 
 def test_selects_first_two_match_days_before_tournament() -> None:

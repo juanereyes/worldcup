@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -19,9 +20,71 @@ from auth_service.database import (
 )
 from auth_service.password_policy import evaluate_password
 
-HOST = "127.0.0.1"
-PORT = 8001
-ALLOWED_ORIGINS = {"http://127.0.0.1:5173", "http://127.0.0.1:5174"}
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = "8001"
+DEFAULT_ALLOWED_ORIGINS = ("http://127.0.0.1:5173", "http://127.0.0.1:5174")
+DEFAULT_COOKIE_SAMESITE = "Lax"
+
+
+def get_host() -> str:
+    return os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else DEFAULT_HOST)
+
+
+def get_port() -> int:
+    return int(os.environ.get("PORT", DEFAULT_PORT))
+
+
+def get_allowed_origins() -> tuple[str, ...]:
+    configured_origins = os.environ.get("ALLOWED_ORIGINS")
+
+    if not configured_origins:
+        return DEFAULT_ALLOWED_ORIGINS
+
+    origins = tuple(
+        origin.strip().rstrip("/")
+        for origin in configured_origins.split(",")
+        if origin.strip()
+    )
+    return origins or DEFAULT_ALLOWED_ORIGINS
+
+
+def get_cookie_domain() -> str | None:
+    configured_domain = os.environ.get("AUTH_COOKIE_DOMAIN", "").strip()
+    return configured_domain or None
+
+
+def get_cookie_secure() -> bool:
+    configured_secure = os.environ.get("AUTH_COOKIE_SECURE")
+
+    if configured_secure is None:
+        return get_cookie_domain() is not None
+
+    return configured_secure.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_cookie_samesite() -> str:
+    configured_samesite = os.environ.get("AUTH_COOKIE_SAMESITE", DEFAULT_COOKIE_SAMESITE).strip()
+
+    if configured_samesite in {"Strict", "Lax", "None"}:
+        return configured_samesite
+
+    return DEFAULT_COOKIE_SAMESITE
+
+
+def session_cookie_attributes(*, max_age: int | None) -> str:
+    attributes = ["Path=/", "HttpOnly", f"SameSite={get_cookie_samesite()}"]
+    cookie_domain = get_cookie_domain()
+
+    if max_age is not None:
+        attributes.insert(0, f"Max-Age={max_age}")
+
+    if cookie_domain:
+        attributes.append(f"Domain={cookie_domain}")
+
+    if get_cookie_secure():
+        attributes.append("Secure")
+
+    return "; ".join(attributes)
 
 
 class AuthRequestHandler(BaseHTTPRequestHandler):
@@ -206,8 +269,10 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(response)
 
     def send_cors_headers(self) -> None:
+        allowed_origins = get_allowed_origins()
         origin = self.headers.get("Origin")
-        allowed_origin = origin if origin in ALLOWED_ORIGINS else "http://127.0.0.1:5174"
+        normalized_origin = origin.rstrip("/") if origin else None
+        allowed_origin = normalized_origin if normalized_origin in allowed_origins else allowed_origins[-1]
 
         self.send_header("Access-Control-Allow-Origin", allowed_origin)
         self.send_header("Access-Control-Allow-Credentials", "true")
@@ -219,15 +284,14 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
             "Set-Cookie",
             (
                 f"worldcup_auth_session={token}; "
-                f"Max-Age={SESSION_DAYS * 24 * 60 * 60}; "
-                "Path=/; HttpOnly; SameSite=Lax"
+                f"{session_cookie_attributes(max_age=SESSION_DAYS * 24 * 60 * 60)}"
             ),
         )
 
     def clear_session_cookie_header(self) -> tuple[str, str]:
         return (
             "Set-Cookie",
-            "worldcup_auth_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax",
+            f"worldcup_auth_session=; {session_cookie_attributes(max_age=0)}",
         )
 
     def get_session_token(self) -> str | None:
@@ -254,8 +318,10 @@ def run() -> None:
     with connect() as connection:
         initialize_database(connection)
 
-    server = ThreadingHTTPServer((HOST, PORT), AuthRequestHandler)
-    print(f"Auth service listening on http://{HOST}:{PORT}")
+    host = get_host()
+    port = get_port()
+    server = ThreadingHTTPServer((host, port), AuthRequestHandler)
+    print(f"Auth service listening on http://{host}:{port}")
     server.serve_forever()
 
 
