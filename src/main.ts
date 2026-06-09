@@ -3148,8 +3148,8 @@ const renderScoreboardTable = (
               <tr>
                 <th>#</th>
                 <th>${selectedCopy.lobbyPage.scoreboardUser}</th>
-                <th>${selectedCopy.lobbyPage.scoreboardPoints}</th>
                 ${showDailyPoints ? `<th>${selectedCopy.lobbyPage.scoreboardDailyPoints(lobbyScoreboard?.date ?? "")}</th>` : ""}
+                <th>${selectedCopy.lobbyPage.scoreboardPoints}</th>
               </tr>
             </thead>
             <tbody>
@@ -3159,12 +3159,12 @@ const renderScoreboardTable = (
                     <tr>
                       <td>${index + 1}</td>
                       <td>${escapeHtml(row.username)}</td>
-                      <td><strong>${row[pointsKey]}</strong></td>
                       ${
                         showDailyPoints
                           ? `<td><span class="daily-points ${row.dailyPoints > 0 ? "is-positive" : "is-zero"}">${row.dailyPoints > 0 ? `+${row.dailyPoints}` : "0"}</span></td>`
                           : ""
                       }
+                      <td><strong>${row[pointsKey]}</strong></td>
                     </tr>
                   `
                 )
