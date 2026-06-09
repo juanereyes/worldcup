@@ -15,6 +15,7 @@ from auth_service.database import (
     create_session,
     create_user,
     delete_session,
+    delete_user,
     get_user_for_session,
     initialize_database,
 )
@@ -189,6 +190,10 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_DELETE(self) -> None:
+        if self.path == "/account":
+            self.delete_account()
+            return
+
         if self.path != "/session":
             self.send_json(404, {"error": "Not found."})
             return
@@ -203,6 +208,33 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
         self.send_json(
             200,
             {"status": "signed_out"},
+            extra_headers=[self.clear_session_cookie_header()],
+        )
+
+    def delete_account(self) -> None:
+        token = self.get_session_token()
+
+        if not token:
+            self.send_json(401, {"error": "Not signed in."})
+            return
+
+        with connect() as connection:
+            initialize_database(connection)
+            user = get_user_for_session(connection, token)
+
+            if user is None:
+                self.send_json(
+                    401,
+                    {"error": "Session expired or invalid."},
+                    extra_headers=[self.clear_session_cookie_header()],
+                )
+                return
+
+            delete_user(connection, user.id)
+
+        self.send_json(
+            200,
+            {"status": "account_deleted"},
             extra_headers=[self.clear_session_cookie_header()],
         )
 

@@ -209,6 +209,13 @@ type DeleteLobbyModalState = {
   isSubmitting: boolean;
 };
 
+type DeleteAccountModalState = {
+  isOpen: boolean;
+  confirmationText: string;
+  message: string | null;
+  isSubmitting: boolean;
+};
+
 type PredictionCopyScope = "all" | "phase";
 
 type PredictionCopyModalState = {
@@ -299,6 +306,7 @@ type Copy = {
   };
   signIn: string;
   signOut: string;
+  deleteAccount: string;
   eyebrow: string;
   headline: string;
   summary: string;
@@ -514,6 +522,15 @@ type Copy = {
     cancel: string;
     error: string;
   };
+  accountDeletion: {
+    title: string;
+    body: (phrase: string) => string;
+    phrase: string;
+    label: string;
+    confirm: string;
+    cancel: string;
+    error: string;
+  };
 };
 
 const languageOptions: LanguageOption[] = [
@@ -697,6 +714,12 @@ let deleteLobbyModal: DeleteLobbyModalState = {
   message: null,
   isSubmitting: false
 };
+let deleteAccountModal: DeleteAccountModalState = {
+  isOpen: false,
+  confirmationText: "",
+  message: null,
+  isSubmitting: false
+};
 let globalPlacementPredictionModal: GlobalPlacementPredictionModalState = {
   isOpen: false,
   predictionId: null,
@@ -724,6 +747,16 @@ const signOutIcon = `
     <path d="M14 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
     <path d="M10 17l5-5-5-5" />
     <path d="M15 12H3" />
+  </svg>
+`;
+
+const trashIcon = `
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M3 6h18" />
+    <path d="M8 6V4h8v2" />
+    <path d="M6 6l1 18h10l1-18" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
   </svg>
 `;
 
@@ -918,6 +951,7 @@ const copy: Record<Language, Copy> = {
     },
     signIn: "Sign in",
     signOut: "Sign out",
+    deleteAccount: "Delete account",
     eyebrow: "FIFA World Cup 2026",
     headline: "Run your tournament pool from kickoff to final whistle.",
     summary:
@@ -1262,6 +1296,16 @@ const copy: Record<Language, Copy> = {
       confirm: "Delete lobby",
       cancel: "Cancel",
       error: "Could not delete this lobby right now."
+    },
+    accountDeletion: {
+      title: "Delete account",
+      body: (phrase) =>
+        `This action is irreversible. Your account and sign-in access will be permanently deleted. Type "${phrase}" to confirm.`,
+      phrase: "delete account",
+      label: "Confirmation text",
+      confirm: "Delete account",
+      cancel: "Cancel",
+      error: "Could not delete your account right now."
     }
   },
   es: {
@@ -1278,6 +1322,7 @@ const copy: Record<Language, Copy> = {
     },
     signIn: "Iniciar sesión",
     signOut: "Cerrar sesión",
+    deleteAccount: "Eliminar cuenta",
     eyebrow: "Copa Mundial FIFA 2026",
     headline: "Organiza tu polla mundialista desde el primer partido hasta la final.",
     summary:
@@ -1622,6 +1667,16 @@ const copy: Record<Language, Copy> = {
       confirm: "Eliminar lobby",
       cancel: "Cancelar",
       error: "No se pudo eliminar este lobby en este momento."
+    },
+    accountDeletion: {
+      title: "Eliminar cuenta",
+      body: (phrase) =>
+        `Esta acción es irreversible. Tu cuenta y acceso de inicio de sesión se eliminarán permanentemente. Escribe "${phrase}" para confirmar.`,
+      phrase: "eliminar cuenta",
+      label: "Texto de confirmación",
+      confirm: "Eliminar cuenta",
+      cancel: "Cancelar",
+      error: "No se pudo eliminar tu cuenta en este momento."
     }
   }
 };
@@ -3921,6 +3976,48 @@ const renderDeleteLobbyModal = (selectedCopy: Copy) => {
   `;
 };
 
+const renderDeleteAccountModal = (selectedCopy: Copy) => {
+  if (!deleteAccountModal.isOpen) {
+    return "";
+  }
+
+  const isConfirmationValid =
+    deleteAccountModal.confirmationText.trim().toLowerCase() === selectedCopy.accountDeletion.phrase;
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="join-lobby-modal" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
+        <div class="modal-header">
+          <h2 id="delete-account-title">${selectedCopy.accountDeletion.title}</h2>
+          <button class="modal-close" type="button" id="delete-account-close" aria-label="${selectedCopy.accountDeletion.cancel}">
+            ×
+          </button>
+        </div>
+        <p class="leave-lobby-body">${selectedCopy.accountDeletion.body(selectedCopy.accountDeletion.phrase)}</p>
+        <label class="join-code-field delete-confirmation-field" for="delete-account-confirmation">
+          <span>${selectedCopy.accountDeletion.label}</span>
+          <input
+            id="delete-account-confirmation"
+            name="confirmation"
+            type="text"
+            autocomplete="off"
+            value="${deleteAccountModal.confirmationText}"
+          />
+        </label>
+        ${deleteAccountModal.message ? `<p class="join-lobby-message">${deleteAccountModal.message}</p>` : ""}
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="delete-account-cancel">
+            ${selectedCopy.accountDeletion.cancel}
+          </button>
+          <button class="danger-action" type="button" id="delete-account-confirm" ${deleteAccountModal.isSubmitting || !isConfirmationValid ? "disabled" : ""}>
+            ${selectedCopy.accountDeletion.confirm}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
 const renderLobbyRulesModal = (selectedCopy: Copy, language: Language) => {
   if (!areLobbyRulesVisible || !currentLobby) {
     return "";
@@ -4556,6 +4653,10 @@ const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | und
                   ${signOutIcon}
                   <span>${selectedCopy.signOut}</span>
                 </button>
+                <button class="account-danger-option" id="delete-account-button" type="button" role="menuitem">
+                  ${trashIcon}
+                  <span>${selectedCopy.deleteAccount}</span>
+                </button>
               </div>
             </div>
           `
@@ -4690,6 +4791,7 @@ const render = (language: Language) => {
   ${renderLeaveLobbyModal(selectedCopy)}
   ${renderKickMemberModal(selectedCopy)}
   ${renderDeleteLobbyModal(selectedCopy)}
+  ${renderDeleteAccountModal(selectedCopy)}
   ${renderLobbyRulesModal(selectedCopy, language)}
   ${renderPredictionCopyModal(selectedCopy)}
   ${renderGlobalPlacementPredictionModal(selectedCopy, language)}
@@ -4707,6 +4809,7 @@ const render = (language: Language) => {
   const accountTrigger = document.querySelector<HTMLButtonElement>("#account-trigger");
   const accountMenu = document.querySelector<HTMLDivElement>("#account-menu");
   const signOutButton = document.querySelector<HTMLButtonElement>("#signout-button");
+  const deleteAccountButton = document.querySelector<HTMLButtonElement>("#delete-account-button");
   const carouselButtons = document.querySelectorAll<HTMLButtonElement>("[data-carousel-action]");
   const createLobbyButton = document.querySelector<HTMLButtonElement>("#create-lobby-button");
   const createLobbyForm = document.querySelector<HTMLFormElement>("#create-lobby-form");
@@ -4737,6 +4840,10 @@ const render = (language: Language) => {
   const deleteLobbyCloseButton = document.querySelector<HTMLButtonElement>("#delete-lobby-close");
   const deleteLobbyCancelButton = document.querySelector<HTMLButtonElement>("#delete-lobby-cancel");
   const deleteLobbyConfirmButton = document.querySelector<HTMLButtonElement>("#delete-lobby-confirm");
+  const deleteAccountInput = document.querySelector<HTMLInputElement>("#delete-account-confirmation");
+  const deleteAccountCloseButton = document.querySelector<HTMLButtonElement>("#delete-account-close");
+  const deleteAccountCancelButton = document.querySelector<HTMLButtonElement>("#delete-account-cancel");
+  const deleteAccountConfirmButton = document.querySelector<HTMLButtonElement>("#delete-account-confirm");
   const pointSystemButtons = document.querySelectorAll<HTMLButtonElement>("[data-point-system]");
   const pointSystemContinueButton = document.querySelector<HTMLButtonElement>("#point-system-continue");
   const predictionDropdownControls = document.querySelectorAll<HTMLDivElement>("[data-prediction-dropdown]");
@@ -4873,6 +4980,46 @@ const render = (language: Language) => {
       currentUser = null;
       window.location.href = "/";
     }
+  });
+
+  const closeDeleteAccountModal = () => {
+    deleteAccountModal = {
+      isOpen: false,
+      confirmationText: "",
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  deleteAccountButton?.addEventListener("click", () => {
+    closeAccountMenu();
+    deleteAccountModal = {
+      isOpen: true,
+      confirmationText: "",
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+    document.querySelector<HTMLInputElement>("#delete-account-confirmation")?.focus();
+  });
+
+  deleteAccountInput?.addEventListener("input", () => {
+    deleteAccountModal = {
+      ...deleteAccountModal,
+      confirmationText: deleteAccountInput.value,
+      message: null
+    };
+    if (deleteAccountConfirmButton) {
+      deleteAccountConfirmButton.disabled =
+        deleteAccountModal.confirmationText.trim().toLowerCase() !== selectedCopy.accountDeletion.phrase;
+    }
+  });
+
+  deleteAccountCloseButton?.addEventListener("click", closeDeleteAccountModal);
+  deleteAccountCancelButton?.addEventListener("click", closeDeleteAccountModal);
+  deleteAccountConfirmButton?.addEventListener("click", () => {
+    void deleteCurrentAccount(selectedCopy);
   });
 
   carouselButtons.forEach((button) => {
@@ -6018,6 +6165,61 @@ const render = (language: Language) => {
   deleteLobbyConfirmButton?.addEventListener("click", () => {
     void deleteCurrentLobby(selectedCopy);
   });
+};
+
+const deleteCurrentAccount = async (selectedCopy: Copy) => {
+  const user = await getAuthenticatedUser();
+
+  if (!user) {
+    return;
+  }
+
+  if (deleteAccountModal.confirmationText.trim().toLowerCase() !== selectedCopy.accountDeletion.phrase) {
+    return;
+  }
+
+  deleteAccountModal = {
+    ...deleteAccountModal,
+    isSubmitting: true,
+    message: null
+  };
+  render(getStoredLanguage());
+
+  try {
+    const lobbyCleanupResponse = await fetch(`${lobbiesApiUrl}/users/${user.id}/lobbies`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+
+    if (!lobbyCleanupResponse.ok) {
+      throw new Error("Could not remove account from lobbies.");
+    }
+
+    const response = await fetch(`${authApiUrl}/account`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not delete account.");
+    }
+
+    deleteAccountModal = {
+      isOpen: false,
+      confirmationText: "",
+      message: null,
+      isSubmitting: false
+    };
+    currentUser = null;
+    window.location.href = "/";
+  } catch {
+    deleteAccountModal = {
+      ...deleteAccountModal,
+      message: selectedCopy.accountDeletion.error,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  }
 };
 
 const loadCurrentUser = async () => {

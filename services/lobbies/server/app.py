@@ -38,6 +38,7 @@ from lobby_service.database import (
     list_user_lobbies,
     remove_lobby_member,
     remove_lobby_member_by_admin,
+    remove_user_from_all_lobbies,
     save_default_match_prediction,
     save_match_prediction,
     save_special_prediction,
@@ -1532,6 +1533,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path_parts = [part for part in parsed.path.split("/") if part]
 
+        if len(path_parts) == 3 and path_parts[0] == "users" and path_parts[2] == "lobbies":
+            self.remove_user_from_all_lobbies(path_parts[1])
+            return
+
         if len(path_parts) == 2 and path_parts[0] == "lobbies":
             self.delete_lobby(path_parts[1])
             return
@@ -1580,6 +1585,31 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
 
         self.send_json(200, {"status": "removed"})
+
+    def remove_user_from_all_lobbies(self, user_id_text: str) -> None:
+        try:
+            user_id = int(user_id_text)
+        except ValueError:
+            self.send_json(400, {"error": "User id must be a number."})
+            return
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                authenticated_user = self.get_authenticated_user()
+                authenticated_user_id = int(authenticated_user["id"])
+
+                if authenticated_user_id != user_id:
+                    self.send_json(403, {"code": "forbidden", "error": "Users can only remove their own lobbies."})
+                    return
+
+                removed_count = remove_user_from_all_lobbies(connection, user_id)
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+
+        self.send_json(200, {"status": "removed", "removedCount": removed_count})
 
     def delete_lobby(self, code: str) -> None:
         with connect() as connection:

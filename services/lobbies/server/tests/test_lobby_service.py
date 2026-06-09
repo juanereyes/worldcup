@@ -32,6 +32,7 @@ from lobby_service.database import (
     list_match_predictions,
     remove_lobby_member,
     remove_lobby_member_by_admin,
+    remove_user_from_all_lobbies,
     save_default_match_prediction,
     save_match_prediction,
     set_lobby_custom_settings,
@@ -433,6 +434,43 @@ class LobbyServiceTest(unittest.TestCase):
         self.assertEqual([member.username for member in updated_lobby.members], ["ana"])
         self.assertEqual(updated_lobby.member_count, 1)
         self.assertEqual(list_user_lobbies(self.connection, 1), [])
+
+    def test_remove_user_from_all_lobbies_removes_memberships_and_empty_lobbies(self) -> None:
+        solo_lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+            name="Solo",
+        )
+        shared_lobby = create_lobby(
+            self.connection,
+            created_by_user_id=2,
+            created_by_username="ana",
+            name="Shared",
+        )
+        add_lobby_member(
+            self.connection,
+            code=shared_lobby.code,
+            user_id=1,
+            username="juan",
+        )
+        save_default_match_prediction(
+            self.connection,
+            user_id=1,
+            match_id=1001,
+            home_score=2,
+            away_score=1,
+        )
+
+        removed_count = remove_user_from_all_lobbies(self.connection, 1)
+
+        self.assertEqual(removed_count, 2)
+        with self.assertRaises(LobbyNotFoundError):
+            get_lobby(self.connection, solo_lobby.code)
+        updated_shared_lobby = get_lobby(self.connection, shared_lobby.code)
+        self.assertEqual([member.username for member in updated_shared_lobby.members], ["ana"])
+        self.assertEqual(list_user_lobbies(self.connection, 1), [])
+        self.assertEqual(list_default_match_predictions(self.connection, user_id=1), [])
 
     def test_initialize_database_backfills_member_count(self) -> None:
         lobby = create_lobby(

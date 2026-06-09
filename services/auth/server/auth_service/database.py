@@ -222,3 +222,11 @@ def delete_session(connection: sqlite3.Connection, token: str) -> None:
         (hash_session_token(token),),
     )
     connection.commit()
+
+
+def delete_user(connection: sqlite3.Connection, user_id: int) -> None:
+    connection.execute(
+        "DELETE FROM users WHERE id = ?",
+        (user_id,),
+    )
+    connection.commit()

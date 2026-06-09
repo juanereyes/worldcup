@@ -41,7 +41,8 @@ button,
 .language-trigger,
 .language-option,
 .account-trigger,
-.signout-option {
+.signout-option,
+.account-danger-option {
   color: inherit;
 }
 
@@ -56,7 +57,8 @@ img {
 .language-trigger,
 .language-option,
 .account-trigger,
-.signout-option {
+.signout-option,
+.account-danger-option {
   font: inherit;
 }
 
@@ -134,7 +136,8 @@ img {
 .language-trigger,
 .language-option,
 .account-trigger,
-.signout-option {
+.signout-option,
+.account-danger-option {
   align-items: center;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -168,6 +171,8 @@ img {
 .account-trigger:focus-visible,
 .signout-option:hover,
 .signout-option:focus-visible,
+.account-danger-option:hover,
+.account-danger-option:focus-visible,
 .signin-link:hover,
 .signin-link:focus-visible {
   border-color: #c7d1c5;
@@ -206,7 +211,8 @@ img {
 }
 
 .language-option,
-.signout-option {
+.signout-option,
+.account-danger-option {
   box-shadow: none;
   justify-content: flex-start;
   width: 100%;
@@ -218,17 +224,22 @@ img {
 }
 
 .signout-option {
-  color: var(--red);
-  min-width: 142px;
+  min-width: 170px;
 }
 
-.signout-option:hover,
-.signout-option:focus-visible {
+.account-danger-option {
+  color: var(--red);
+  min-width: 170px;
+}
+
+.account-danger-option:hover,
+.account-danger-option:focus-visible {
   border-color: #efc1bd;
   box-shadow: 0 0 0 3px rgba(200, 61, 53, 0.12);
 }
 
-.signout-option svg {
+.signout-option svg,
+.account-danger-option svg {
   fill: none;
   height: clamp(46px, 5vh, 58px);
   stroke: currentColor;

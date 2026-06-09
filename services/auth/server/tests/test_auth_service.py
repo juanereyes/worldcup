@@ -17,6 +17,7 @@ from auth_service.database import (
     create_session,
     create_user,
     delete_session,
+    delete_user,
     get_user_for_session,
     initialize_database,
 )
@@ -163,6 +164,26 @@ class AuthServiceTest(unittest.TestCase):
         delete_session(self.connection, session.token)
 
         self.assertIsNone(get_user_for_session(self.connection, session.token))
+
+    def test_delete_user_removes_account_and_sessions(self) -> None:
+        user = create_user(
+            self.connection,
+            username="juan",
+            email="juan@example.com",
+            display_name="Juan",
+            password="Worldcup1",
+        )
+        session = create_session(self.connection, user)
+
+        delete_user(self.connection, user.id)
+
+        self.assertIsNone(get_user_for_session(self.connection, session.token))
+        with self.assertRaises(InvalidCredentialsError):
+            authenticate_user(
+                self.connection,
+                identifier="juan",
+                password="Worldcup1",
+            )
 
 
 class AuthDeploymentConfigTest(unittest.TestCase):

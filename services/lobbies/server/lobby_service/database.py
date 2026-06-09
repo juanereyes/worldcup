@@ -582,6 +582,31 @@ def list_user_lobbies(connection: sqlite3.Connection, user_id: int) -> list[Lobb
     return [get_lobby(connection, str(row["code"])) for row in rows]
 
 
+def remove_user_from_all_lobbies(connection: sqlite3.Connection, user_id: int) -> int:
+    rows = connection.execute(
+        """
+        SELECT lobby_code
+        FROM lobby_members
+        WHERE user_id = ?
+        ORDER BY joined_at DESC
+        """,
+        (user_id,),
+    ).fetchall()
+
+    lobby_codes = [str(row["lobby_code"]) for row in rows]
+
+    for lobby_code in lobby_codes:
+        remove_lobby_member(connection, code=lobby_code, user_id=user_id)
+
+    connection.execute(
+        "DELETE FROM default_match_predictions WHERE user_id = ?",
+        (user_id,),
+    )
+    connection.commit()
+
+    return len(lobby_codes)
+
+
 def get_lobby_for_member(connection: sqlite3.Connection, *, code: str, user_id: int) -> LobbyRecord:
     normalized_code = code.strip().upper()
     lobby = get_lobby(connection, normalized_code)
