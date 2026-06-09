@@ -1,4 +1,4 @@
-import { copyFile } from "node:fs/promises";
+import { cp, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const pages = [
@@ -15,3 +15,7 @@ const pages = [
 await Promise.all(
   pages.map((page) => copyFile(join("dist", "index.html"), join("dist", page)))
 );
+
+await cp(join("assets", "flags"), join("dist", "assets", "flags"), {
+  recursive: true
+});
