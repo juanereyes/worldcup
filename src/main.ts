@@ -1095,7 +1095,8 @@ const copy: Record<Language, Copy> = {
               items: [
                 "Hitting the exact score = 4 pts",
                 "Hitting the correct result (A wins, B wins or Draw) = 2 pts",
-                "Wrong result = 0 pts"
+                "Wrong result = 0 pts",
+                "Knockout phase match points are doubled."
               ]
             },
             {
@@ -1116,7 +1117,8 @@ const copy: Record<Language, Copy> = {
                 "Correct Result + Correct goal difference if winner = 4 pts",
                 "Correct Result but not exact score = 3 pts",
                 "Wrong result + Correct goals home but incorrect away = 1 pt",
-                "Wrong result + Correct goals away but incorrect home = 1 pt"
+                "Wrong result + Correct goals away but incorrect home = 1 pt",
+                "Knockout phase match points are doubled."
               ]
             },
             {
@@ -1139,7 +1141,10 @@ const copy: Record<Language, Copy> = {
           sections: [
             {
               title: "Regular scoring settings",
-              items: ["Choose from the settings in the regular setup while choosing scores."]
+              items: [
+                "Choose from the settings in the regular setup while choosing scores.",
+                "Knockout phase match points are doubled."
+              ]
             },
             {
               title: "Additional features",
@@ -1442,7 +1447,8 @@ const copy: Record<Language, Copy> = {
               items: [
                 "Acertar el marcador exacto = 4 pts",
                 "Acertar el resultado correcto (A gana, B gana o empate) = 2 pts",
-                "Resultado incorrecto = 0 pts"
+                "Resultado incorrecto = 0 pts",
+                "Los puntos de partidos en fase eliminatoria se duplican."
               ]
             },
             {
@@ -1463,7 +1469,8 @@ const copy: Record<Language, Copy> = {
                 "Resultado correcto + diferencia de gol correcta si hay ganador = 4 pts",
                 "Resultado correcto pero no marcador exacto = 3 pts",
                 "Resultado incorrecto + goles del local correctos pero visitante incorrecto = 1 pt",
-                "Resultado incorrecto + goles del visitante correctos pero local incorrecto = 1 pt"
+                "Resultado incorrecto + goles del visitante correctos pero local incorrecto = 1 pt",
+                "Los puntos de partidos en fase eliminatoria se duplican."
               ]
             },
             {
@@ -1486,7 +1493,10 @@ const copy: Record<Language, Copy> = {
           sections: [
             {
               title: "Configuración de puntaje regular",
-              items: ["Elige entre las opciones de la configuración regular con puntajes personalizados."]
+              items: [
+                "Elige entre las opciones de la configuración regular con puntajes personalizados.",
+                "Los puntos de partidos en fase eliminatoria se duplican."
+              ]
             },
             {
               title: "Funciones adicionales",
@@ -2318,6 +2328,7 @@ const renderLobbyRulesPanel = (selectedCopy: Copy, language: Language, lobby: Lo
         <div class="lobby-rules-section">
           <h4>${selectedCopy.customSettingsPage.matchSpecific}</h4>
           ${renderCustomRuleList(selectedCopy, lobby, matchSpecificCustomFields)}
+          <p>${selectedPointSystemOption.sections[0]?.items[1] ?? ""}</p>
         </div>
         <div class="lobby-rules-section">
           <h4>${selectedCopy.customSettingsPage.global}</h4>

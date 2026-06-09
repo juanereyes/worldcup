@@ -96,9 +96,9 @@ class LobbyScoreboardTest(unittest.TestCase):
         payload = build_scoreboard_payload(lobby, predictions, matches)
         rows = {row["username"]: row for row in payload["scoreboard"]["general"]}
 
-        self.assertEqual(rows["ana"]["totalPoints"], 8)
+        self.assertEqual(rows["ana"]["totalPoints"], 12)
         self.assertEqual(rows["ana"]["groupStagePoints"], 4)
-        self.assertEqual(rows["ana"]["knockoutStagePoints"], 4)
+        self.assertEqual(rows["ana"]["knockoutStagePoints"], 8)
         self.assertEqual(rows["juan"]["totalPoints"], 2)
         self.assertEqual(rows["juan"]["groupStagePoints"], 2)
         self.assertEqual(rows["juan"]["knockoutStagePoints"], 0)
@@ -149,6 +149,53 @@ class LobbyScoreboardTest(unittest.TestCase):
 
         self.assertEqual(row["totalPoints"], 10)
         self.assertEqual(row["groupStagePoints"], 10)
+
+    def test_choose_team_custom_feature_stacks_with_knockout_double_points(self) -> None:
+        lobby = LobbyRecord(
+            code="ABCD",
+            name="Friends",
+            requires_password=False,
+            member_count=1,
+            point_system="custom",
+            custom_settings={
+                "enabledFields": {"exactScore": True},
+                "values": {"exactScore": "5"},
+                "enabledFeatures": {"chooseTeam": True},
+                "trackedTeam": "",
+            },
+            members=[LobbyMemberRecord(user_id=1, username="ana", role="admin")],
+        )
+        predictions = [MemberMatchPredictionRecord(user_id=1, username="ana", match_id=20, home_score=2, away_score=1)]
+        special_predictions = [
+            MemberSpecialPredictionRecord(
+                user_id=1,
+                username="ana",
+                prediction_type="chooseTeam",
+                team_name="Mexico",
+                player_country=None,
+                player_name=None,
+                player_number=None,
+                selections=None,
+            )
+        ]
+        matches = {
+            20: FinishedMatch(
+                id=20,
+                stage="Last 32",
+                group=None,
+                date="2026-07-01",
+                home_team="Mexico",
+                away_team="Canada",
+                home_score=2,
+                away_score=1,
+            ),
+        }
+
+        payload = build_scoreboard_payload(lobby, predictions, matches, special_predictions)
+        row = payload["scoreboard"]["general"][0]
+
+        self.assertEqual(row["totalPoints"], 20)
+        self.assertEqual(row["knockoutStagePoints"], 20)
 
     def test_track_team_scores_exact_furthest_phase_prediction(self) -> None:
         lobby = LobbyRecord(

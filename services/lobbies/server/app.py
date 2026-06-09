@@ -277,15 +277,17 @@ def score_lobby_match_prediction(
     else:
         points = score_simple_match_prediction(prediction, actual)
 
+    multiplier = 2 if not is_group_stage_match(match) else 1
+
     if (
         lobby.point_system == "custom"
         and is_custom_feature_enabled(lobby, "chooseTeam")
         and normalized_team(special_by_user.get(user_id, {}).get("chooseTeam", {}).get("teamName"))
         in {normalized_team(match.home_team), normalized_team(match.away_team)}
     ):
-        return points * 2
+        multiplier *= 2
 
-    return points
+    return points * multiplier
 
 
 def score_custom_match_prediction(settings: dict[str, Any], prediction: ScorePrediction, actual: ScorePrediction) -> int:
