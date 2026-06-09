@@ -12,14 +12,17 @@ from auth_service.database import (
     DuplicateUserError,
     InvalidCredentialsError,
     InvalidPasswordError,
+    UnverifiedEmailError,
     authenticate_user,
     connect,
+    create_email_verification,
     create_session,
     create_user,
     delete_session,
     delete_user,
     get_user_for_session,
     initialize_database,
+    verify_email_token,
 )
 from auth_service.password_policy import is_valid_password, password_errors
 
@@ -34,6 +37,11 @@ class AuthServiceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close()
         self.temp_dir.cleanup()
+
+    def verify_user_email(self, user: object) -> None:
+        verification = create_email_verification(self.connection, user)  # type: ignore[arg-type]
+        verified_user = verify_email_token(self.connection, verification.token)
+        self.assertIsNotNone(verified_user)
 
     def test_password_policy(self) -> None:
         self.assertFalse(is_valid_password("short"))
@@ -57,6 +65,7 @@ class AuthServiceTest(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertTrue(row["password_hash"].startswith("$argon2id$"))
         PasswordHasher().verify(row["password_hash"], "Worldcup1")
+        self.assertFalse(user.email_verified)
 
     def test_duplicate_username_and_email_are_rejected(self) -> None:
         create_user(
@@ -96,13 +105,14 @@ class AuthServiceTest(unittest.TestCase):
             )
 
     def test_authenticate_user_accepts_username_or_email(self) -> None:
-        create_user(
+        user = create_user(
             self.connection,
             username="juan",
             email="juan@example.com",
             display_name="Juan",
             password="Worldcup1",
         )
+        self.verify_user_email(user)
 
         by_username = authenticate_user(
             self.connection,
@@ -118,7 +128,7 @@ class AuthServiceTest(unittest.TestCase):
         self.assertEqual(by_username.username, "juan")
         self.assertEqual(by_email.email, "juan@example.com")
 
-    def test_authenticate_user_rejects_bad_credentials(self) -> None:
+    def test_authenticate_user_rejects_unverified_email(self) -> None:
         create_user(
             self.connection,
             username="juan",
@@ -126,6 +136,31 @@ class AuthServiceTest(unittest.TestCase):
             display_name="Juan",
             password="Worldcup1",
         )
+
+        with self.assertRaises(UnverifiedEmailError) as error:
+            authenticate_user(
+                self.connection,
+                identifier="juan",
+                password="Worldcup1",
+            )
+        self.assertEqual(error.exception.email, "juan@example.com")
+
+        with self.assertRaises(InvalidCredentialsError):
+            authenticate_user(
+                self.connection,
+                identifier="juan",
+                password="Wrongpass1",
+            )
+
+    def test_authenticate_user_rejects_bad_credentials(self) -> None:
+        user = create_user(
+            self.connection,
+            username="juan",
+            email="juan@example.com",
+            display_name="Juan",
+            password="Worldcup1",
+        )
+        self.verify_user_email(user)
 
         with self.assertRaises(InvalidCredentialsError):
             authenticate_user(
@@ -150,6 +185,23 @@ class AuthServiceTest(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertNotEqual(row["token_hash"], session.token)
         self.assertEqual(session_user, user)
+
+    def test_verify_email_token_marks_user_verified_and_consumes_token(self) -> None:
+        user = create_user(
+            self.connection,
+            username="juan",
+            email="juan@example.com",
+            display_name="Juan",
+            password="Worldcup1",
+        )
+        verification = create_email_verification(self.connection, user)
+
+        verified_user = verify_email_token(self.connection, verification.token)
+        reused_user = verify_email_token(self.connection, verification.token)
+
+        self.assertIsNotNone(verified_user)
+        self.assertTrue(verified_user.email_verified)  # type: ignore[union-attr]
+        self.assertIsNone(reused_user)
 
     def test_delete_session_removes_session_lookup(self) -> None:
         user = create_user(

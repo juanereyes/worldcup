@@ -392,6 +392,43 @@ h1 {
   color: var(--blue);
 }
 
+.verification-actions {
+  background: #f6f8f3;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.verification-actions p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.secondary-submit-button,
+.dev-verification-link {
+  border-radius: 8px;
+  font-weight: 800;
+  min-height: 42px;
+  padding: 10px 12px;
+}
+
+.secondary-submit-button {
+  border: 1px solid var(--line);
+  color: var(--green-dark);
+  justify-self: start;
+}
+
+.dev-verification-link {
+  align-items: center;
+  border: 1px solid #c8d9ec;
+  color: var(--blue);
+  display: inline-flex;
+  justify-self: start;
+}
+
 .submit-button {
   background: var(--green);
   border: 1px solid var(--green);

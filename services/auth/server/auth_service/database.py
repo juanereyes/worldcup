@@ -32,12 +32,26 @@ class InvalidCredentialsError(ValueError):
     pass
 
 
+class UnverifiedEmailError(ValueError):
+    def __init__(self, email: str) -> None:
+        super().__init__("Please verify your email before signing in.")
+        self.email = email
+
+
 @dataclass(frozen=True)
 class UserRecord:
     id: int
     username: str
     email: str
     display_name: str
+    email_verified: bool
+
+
+@dataclass(frozen=True)
+class EmailVerificationRecord:
+    token: str
+    expires_at: datetime
+    user: UserRecord
 
 
 @dataclass(frozen=True)
@@ -74,10 +88,23 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           email TEXT NOT NULL UNIQUE COLLATE NOCASE,
           display_name TEXT NOT NULL,
           password_hash TEXT NOT NULL,
+          email_verified INTEGER NOT NULL DEFAULT 1,
+          email_verified_at TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    user_columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(users)").fetchall()
+    }
+
+    if "email_verified" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1")
+
+    if "email_verified_at" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN email_verified_at TEXT")
+
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS sessions (
@@ -85,6 +112,18 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           user_id INTEGER NOT NULL,
           token_hash TEXT NOT NULL UNIQUE,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          expires_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS email_verifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
           expires_at TEXT NOT NULL,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
@@ -103,6 +142,7 @@ def row_to_user(row: sqlite3.Row) -> UserRecord:
         username=str(row["username"]),
         email=str(row["email"]),
         display_name=str(row["display_name"]),
+        email_verified=bool(row["email_verified"]),
     )
 
 
@@ -146,6 +186,14 @@ def create_user(
             """,
             (username, email, display_name, password_hash),
         )
+        connection.execute(
+            """
+            UPDATE users
+            SET email_verified = 0, email_verified_at = NULL
+            WHERE id = ?
+            """,
+            (int(cursor.lastrowid),),
+        )
         connection.commit()
     except sqlite3.IntegrityError as error:
         raise DuplicateUserError("Username or email is already registered.") from error
@@ -155,6 +203,7 @@ def create_user(
         username=username,
         email=email,
         display_name=display_name,
+        email_verified=False,
     )
 
 
@@ -167,7 +216,7 @@ def authenticate_user(
     identifier = identifier.strip()
     row = connection.execute(
         """
-        SELECT id, username, email, display_name, password_hash
+        SELECT id, username, email, display_name, password_hash, email_verified
         FROM users
         WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE
         """,
@@ -182,7 +231,113 @@ def authenticate_user(
     except (VerificationError, VerifyMismatchError) as error:
         raise InvalidCredentialsError("Invalid username/email or password.") from error
 
+    if not bool(row["email_verified"]):
+        raise UnverifiedEmailError(str(row["email"]))
+
     return row_to_user(row)
+
+
+def get_user_by_email(connection: sqlite3.Connection, email: str) -> UserRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, username, email, display_name, email_verified
+        FROM users
+        WHERE email = ? COLLATE NOCASE
+        """,
+        (email.strip(),),
+    ).fetchone()
+
+    return row_to_user(row) if row else None
+
+
+def create_email_verification(
+    connection: sqlite3.Connection,
+    user: UserRecord,
+    *,
+    minutes_to_live: int = 5,
+) -> EmailVerificationRecord:
+    token = secrets.token_urlsafe(32)
+    token_hash = hash_session_token(token)
+    created_at = datetime.now(timezone.utc)
+    expires_at = created_at + timedelta(minutes=minutes_to_live)
+
+    connection.execute(
+        "DELETE FROM email_verifications WHERE user_id = ?",
+        (user.id,),
+    )
+    connection.execute(
+        """
+        INSERT INTO email_verifications (user_id, token_hash, created_at, expires_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (user.id, token_hash, created_at.isoformat(), expires_at.isoformat()),
+    )
+    connection.commit()
+
+    return EmailVerificationRecord(token=token, expires_at=expires_at, user=user)
+
+
+def verify_email_token(connection: sqlite3.Connection, token: str) -> UserRecord | None:
+    token_hash = hash_session_token(token)
+    now = datetime.now(timezone.utc)
+    row = connection.execute(
+        """
+        SELECT
+          email_verifications.id AS verification_id,
+          email_verifications.expires_at,
+          users.id,
+          users.username,
+          users.email,
+          users.display_name,
+          users.email_verified
+        FROM email_verifications
+        JOIN users ON users.id = email_verifications.user_id
+        WHERE email_verifications.token_hash = ?
+        """,
+        (token_hash,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    verification_id = int(row["verification_id"])
+    expires_at = datetime.fromisoformat(str(row["expires_at"]))
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if now >= expires_at:
+        connection.execute(
+            "DELETE FROM email_verifications WHERE id = ?",
+            (verification_id,),
+        )
+        connection.commit()
+        return None
+
+    connection.execute(
+        """
+        UPDATE users
+        SET email_verified = 1, email_verified_at = ?
+        WHERE id = ?
+        """,
+        (now.isoformat(), int(row["id"])),
+    )
+    connection.execute(
+        "DELETE FROM email_verifications WHERE id = ?",
+        (verification_id,),
+    )
+    connection.commit()
+
+    verified_row = connection.execute(
+        """
+        SELECT id, username, email, display_name, email_verified
+        FROM users
+        WHERE id = ?
+        """,
+        (int(row["id"]),),
+    ).fetchone()
+
+    return row_to_user(verified_row) if verified_row else None
 
 
 def create_session(connection: sqlite3.Connection, user: UserRecord) -> SessionRecord:
@@ -205,7 +360,7 @@ def create_session(connection: sqlite3.Connection, user: UserRecord) -> SessionR
 def get_user_for_session(connection: sqlite3.Connection, token: str) -> UserRecord | None:
     row = connection.execute(
         """
-        SELECT users.id, users.username, users.email, users.display_name
+        SELECT users.id, users.username, users.email, users.display_name, users.email_verified
         FROM sessions
         JOIN users ON users.id = sessions.user_id
         WHERE sessions.token_hash = ? AND sessions.expires_at > ?

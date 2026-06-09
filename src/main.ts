@@ -41,6 +41,7 @@ type CurrentUser = {
   username: string;
   email: string;
   displayName: string;
+  emailVerified: boolean;
 };
 
 type Page =
@@ -719,6 +720,25 @@ let deleteAccountModal: DeleteAccountModalState = {
   confirmationText: "",
   message: null,
   isSubmitting: false
+};
+
+const clearAuthSession = async () => {
+  try {
+    await fetch(`${authApiUrl}/session`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+  } catch {
+    // The auth redirect is still the correct recovery path if this cleanup request fails.
+  }
+};
+
+const redirectToAuthWithCleanState = async () => {
+  currentUser = null;
+  isCurrentUserLoading = false;
+  render(getStoredLanguage());
+  await clearAuthSession();
+  window.location.href = authClientUrl;
 };
 let globalPlacementPredictionModal: GlobalPlacementPredictionModalState = {
   isOpen: false,
@@ -6241,6 +6261,10 @@ const loadCurrentUser = async () => {
     const result = (await response.json()) as { user?: CurrentUser };
     currentUser = result.user ?? null;
     isCurrentUserLoading = false;
+    if (currentUser && !currentUser.emailVerified) {
+      await redirectToAuthWithCleanState();
+      return;
+    }
     if (!currentUser && getCurrentPage() === "predictions") {
       window.location.href = authClientUrl;
       return;
@@ -6259,6 +6283,10 @@ const loadCurrentUser = async () => {
 
 const getAuthenticatedUser = async () => {
   if (currentUser) {
+    if (!currentUser.emailVerified) {
+      await redirectToAuthWithCleanState();
+      return null;
+    }
     return currentUser;
   }
 
@@ -6274,6 +6302,10 @@ const getAuthenticatedUser = async () => {
 
     const result = (await response.json()) as { user?: CurrentUser };
     currentUser = result.user ?? null;
+    if (currentUser && !currentUser.emailVerified) {
+      await redirectToAuthWithCleanState();
+      return null;
+    }
     render(getStoredLanguage());
   } catch {
     currentUser = null;
@@ -7130,6 +7162,11 @@ if (getCurrentPage() === "predictions") {
 
 render(getStoredLanguage());
 void loadCurrentUser();
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    void loadCurrentUser();
+  }
+});
 void loadCarouselMatches();
 void loadAllMatches();
 void loadLobby();

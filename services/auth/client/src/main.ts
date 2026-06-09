@@ -2,6 +2,7 @@ import "./styles.css";
 
 type AuthMode = "signin" | "create";
 type Language = "en" | "es";
+type VerificationStatus = "idle" | "loading" | "success" | "error";
 
 type PasswordRequirement = {
   key: string;
@@ -37,6 +38,17 @@ type AuthCopy = {
   passwordIncomplete: string;
   genericSignInError: string;
   genericCreateError: string;
+  emailNotVerified: string;
+  resendVerification: string;
+  verificationSent: string;
+  verificationSendError: string;
+  verificationInstructions: (email: string) => string;
+  devVerificationLink: string;
+  verificationTitle: string;
+  verificationLoading: string;
+  verificationSuccess: string;
+  verificationError: string;
+  backToSignIn: string;
   signedIn: (username: string) => string;
   accountCreated: (username: string) => string;
   passwordRequirements: PasswordRequirement[];
@@ -49,6 +61,10 @@ const mainAppUrl = ensureTrailingSlash(
   import.meta.env.VITE_MAIN_APP_URL ?? "http://127.0.0.1:5173/"
 );
 const languageStorageKey = "worldcup-language";
+let pendingVerificationEmail = "";
+let devVerificationUrl = "";
+let verificationStatus: VerificationStatus = "idle";
+let verificationFeedback: { state: "success" | "error"; text: string } | null = null;
 
 const languageOptions: LanguageOption[] = [
   {
@@ -111,6 +127,17 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       passwordIncomplete: "Please complete all password requirements.",
       genericSignInError: "Could not sign in.",
       genericCreateError: "Could not create the account.",
+      emailNotVerified: "Please verify your email before signing in.",
+      resendVerification: "Resend verification email",
+      verificationSent: "Verification email sent. Check your inbox.",
+      verificationSendError: "Could not resend the verification email right now.",
+      verificationInstructions: (email) => `We sent a verification link to ${email}. It expires in 5 minutes.`,
+      devVerificationLink: "Open local verification link",
+      verificationTitle: "Verify your email",
+      verificationLoading: "Checking your verification link...",
+      verificationSuccess: "Email verified. You can now sign in.",
+      verificationError: "This verification link expired or was already used.",
+      backToSignIn: "Back to sign in",
       signedIn: (username) => `Signed in as ${username}.`,
       accountCreated: (username) => `Account created for ${username}.`,
       passwordRequirements: [
@@ -141,6 +168,17 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       passwordIncomplete: "Please complete all password requirements.",
       genericSignInError: "Could not sign in.",
       genericCreateError: "Could not create the account.",
+      emailNotVerified: "Please verify your email before signing in.",
+      resendVerification: "Resend verification email",
+      verificationSent: "Verification email sent. Check your inbox.",
+      verificationSendError: "Could not resend the verification email right now.",
+      verificationInstructions: (email) => `We sent a verification link to ${email}. It expires in 5 minutes.`,
+      devVerificationLink: "Open local verification link",
+      verificationTitle: "Verify your email",
+      verificationLoading: "Checking your verification link...",
+      verificationSuccess: "Email verified. You can now sign in.",
+      verificationError: "This verification link expired or was already used.",
+      backToSignIn: "Back to sign in",
       signedIn: (username) => `Signed in as ${username}.`,
       accountCreated: (username) => `Account created for ${username}.`,
       passwordRequirements: [
@@ -173,6 +211,17 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       passwordIncomplete: "Completa todos los requisitos de la contraseña.",
       genericSignInError: "No se pudo iniciar sesión.",
       genericCreateError: "No se pudo crear la cuenta.",
+      emailNotVerified: "Verifica tu correo antes de iniciar sesión.",
+      resendVerification: "Reenviar correo de verificación",
+      verificationSent: "Correo de verificación enviado. Revisa tu bandeja.",
+      verificationSendError: "No se pudo reenviar el correo de verificación en este momento.",
+      verificationInstructions: (email) => `Enviamos un enlace de verificación a ${email}. Expira en 5 minutos.`,
+      devVerificationLink: "Abrir enlace local de verificación",
+      verificationTitle: "Verifica tu correo",
+      verificationLoading: "Revisando tu enlace de verificación...",
+      verificationSuccess: "Correo verificado. Ya puedes iniciar sesión.",
+      verificationError: "Este enlace de verificación expiró o ya fue usado.",
+      backToSignIn: "Volver a iniciar sesión",
       signedIn: (username) => `Sesión iniciada como ${username}.`,
       accountCreated: (username) => `Cuenta creada para ${username}.`,
       passwordRequirements: [
@@ -203,6 +252,17 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
       passwordIncomplete: "Completa todos los requisitos de la contraseña.",
       genericSignInError: "No se pudo iniciar sesión.",
       genericCreateError: "No se pudo crear la cuenta.",
+      emailNotVerified: "Verifica tu correo antes de iniciar sesión.",
+      resendVerification: "Reenviar correo de verificación",
+      verificationSent: "Correo de verificación enviado. Revisa tu bandeja.",
+      verificationSendError: "No se pudo reenviar el correo de verificación en este momento.",
+      verificationInstructions: (email) => `Enviamos un enlace de verificación a ${email}. Expira en 5 minutos.`,
+      devVerificationLink: "Abrir enlace local de verificación",
+      verificationTitle: "Verifica tu correo",
+      verificationLoading: "Revisando tu enlace de verificación...",
+      verificationSuccess: "Correo verificado. Ya puedes iniciar sesión.",
+      verificationError: "Este enlace de verificación expiró o ya fue usado.",
+      backToSignIn: "Volver a iniciar sesión",
       signedIn: (username) => `Sesión iniciada como ${username}.`,
       accountCreated: (username) => `Cuenta creada para ${username}.`,
       passwordRequirements: [
@@ -276,6 +336,61 @@ const renderLanguageMenu = (language: Language, copy: AuthCopy) => {
       </div>
     </div>
   `;
+};
+
+const renderVerificationPage = (language: Language = getStoredLanguage()) => {
+  const copy = authCopy[language].signin;
+  const statusMessage =
+    verificationStatus === "success"
+      ? copy.verificationSuccess
+      : verificationStatus === "error"
+        ? copy.verificationError
+        : copy.verificationLoading;
+
+  document.documentElement.lang = language;
+
+  app.innerHTML = `
+    <section class="auth-shell">
+      <header class="auth-topbar">
+        <a class="brand" href="${mainAppUrl}" aria-label="${copy.brandAria}">
+          <span class="brand-mark" aria-hidden="true">26</span>
+          <span>World Cup Picks</span>
+        </a>
+        <div class="topbar-actions">
+          ${renderLanguageMenu(language, copy)}
+        </div>
+      </header>
+
+      <section class="auth-layout" aria-labelledby="auth-title">
+        <div class="auth-panel">
+          <div class="auth-heading">
+            <p class="eyebrow">${copy.eyebrow}</p>
+            <h1 id="auth-title">${copy.verificationTitle}</h1>
+          </div>
+          <p class="form-message" data-state="${verificationStatus === "error" ? "error" : verificationStatus === "success" ? "success" : "info"}">
+            ${statusMessage}
+          </p>
+          <p class="alternate-action">
+            <button type="button" id="back-to-signin">${copy.backToSignIn}</button>
+          </p>
+        </div>
+      </section>
+    </section>
+  `;
+
+  document.querySelector<HTMLButtonElement>("#back-to-signin")?.addEventListener("click", () => {
+    window.history.replaceState({}, "", window.location.pathname);
+    render("signin", language);
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-language]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextLanguage = button.dataset.language === "es" ? "es" : "en";
+
+      window.localStorage.setItem(languageStorageKey, nextLanguage);
+      renderVerificationPage(nextLanguage);
+    });
+  });
 };
 
 const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
@@ -388,7 +503,29 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
                 `
                 : ""
             }
-            <p class="form-message" id="form-message" role="status"></p>
+            <p
+              class="form-message"
+              id="form-message"
+              role="status"
+              data-state="${verificationFeedback?.state ?? ""}"
+            >${verificationFeedback?.text ?? ""}</p>
+            ${
+              pendingVerificationEmail
+                ? `
+                  <div class="verification-actions">
+                    <p>${copy.verificationInstructions(pendingVerificationEmail)}</p>
+                    <button class="secondary-submit-button" id="resend-verification" type="button">
+                      ${copy.resendVerification}
+                    </button>
+                    ${
+                      devVerificationUrl
+                        ? `<a class="dev-verification-link" href="${devVerificationUrl}">${copy.devVerificationLink}</a>`
+                        : ""
+                    }
+                  </div>
+                `
+                : ""
+            }
             <button class="submit-button" type="submit">${copy.submit}</button>
           </form>
 
@@ -408,6 +545,7 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
   const languageMenu = document.querySelector<HTMLDivElement>("#language-menu");
   const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
+  const resendVerificationButton = document.querySelector<HTMLButtonElement>("#resend-verification");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -437,6 +575,7 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
 
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((button) => {
     button.addEventListener("click", () => {
+      verificationFeedback = null;
       render(button.dataset.mode === "create" ? "create" : "signin", language);
     });
   });
@@ -461,6 +600,40 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
     passwordToggle.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
     passwordToggle.setAttribute("aria-pressed", String(isHidden));
     passwordToggle.innerHTML = isHidden ? eyeSlashIcon : eyeIcon;
+  });
+
+  resendVerificationButton?.addEventListener("click", async () => {
+    if (!pendingVerificationEmail) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${authApiUrl}/email-verifications`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email: pendingVerificationEmail })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? copy.verificationSendError);
+      }
+
+      devVerificationUrl = result.devVerificationUrl ?? "";
+      verificationFeedback = {
+        state: "success",
+        text: copy.verificationSent
+      };
+      render(mode, language);
+    } catch (error) {
+      verificationFeedback = {
+        state: "error",
+        text: error instanceof Error ? error.message : copy.verificationSendError
+      };
+      render(mode, language);
+    }
   });
 
   document.querySelector<HTMLFormElement>(".auth-form")?.addEventListener("submit", async (event) => {
@@ -497,7 +670,25 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
       if (!response.ok) {
         if (formMessage) {
           formMessage.dataset.state = "error";
-          formMessage.textContent = result.error ?? copy.genericSignInError;
+          formMessage.textContent =
+            result.code === "email_not_verified"
+              ? copy.emailNotVerified
+              : result.error ?? copy.genericSignInError;
+        }
+        if (result.code === "email_not_verified") {
+          const identifier = String(formData.get("identifier") ?? "");
+          pendingVerificationEmail =
+            typeof result.email === "string" && result.email
+              ? result.email
+              : identifier.includes("@")
+                ? identifier
+                : "";
+          devVerificationUrl = "";
+          verificationFeedback = {
+            state: "error",
+            text: copy.emailNotVerified
+          };
+          render(mode, language);
         }
         return;
       }
@@ -560,15 +751,30 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
     }
 
     form.reset();
+    pendingVerificationEmail = String(formData.get("email") ?? "");
+    devVerificationUrl = result.devVerificationUrl ?? "";
+    verificationFeedback = null;
     if (requirementsList) {
       requirementsList.innerHTML = renderPasswordRequirements("", copy.passwordRequirements);
     }
-    if (formMessage) {
-      formMessage.dataset.state = "success";
-      formMessage.textContent = copy.accountCreated(result.user.username);
-    }
-    window.location.assign(mainAppUrl);
+    render("signin", language);
   });
 };
 
-render("signin");
+const verificationToken = new URLSearchParams(window.location.search).get("verify");
+
+if (verificationToken) {
+  verificationStatus = "loading";
+  renderVerificationPage();
+  fetch(`${authApiUrl}/email-verifications/${encodeURIComponent(verificationToken)}`)
+    .then((response) => {
+      verificationStatus = response.ok ? "success" : "error";
+      renderVerificationPage();
+    })
+    .catch(() => {
+      verificationStatus = "error";
+      renderVerificationPage();
+    });
+} else {
+  render("signin");
+}
