@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    { "source": "/groups", "destination": "/groups.html" },
+    { "source": "/matches", "destination": "/matches.html" },
+    { "source": "/bracket", "destination": "/bracket.html" },
+    { "source": "/lobby", "destination": "/lobby.html" },
+    { "source": "/my-lobbies", "destination": "/my-lobbies.html" },
+    { "source": "/predictions", "destination": "/predictions.html" },
+    { "source": "/point-system", "destination": "/point-system.html" },
+    { "source": "/custom-settings", "destination": "/custom-settings.html" }
+  ]
+}

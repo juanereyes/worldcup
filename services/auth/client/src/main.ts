@@ -45,8 +45,12 @@ type AuthCopy = {
   passwordRequirements: PasswordRequirement[];
 };
 
-const authApiUrl = "http://127.0.0.1:8001";
-const mainAppUrl = "http://127.0.0.1:5173/";
+const ensureTrailingSlash = (url: string) => (url.endsWith("/") ? url : `${url}/`);
+
+const authApiUrl = import.meta.env.VITE_AUTH_API_URL ?? "http://127.0.0.1:8001";
+const mainAppUrl = ensureTrailingSlash(
+  import.meta.env.VITE_MAIN_APP_URL ?? "http://127.0.0.1:5173/"
+);
 const languageStorageKey = "worldcup-language";
 
 const languageOptions: LanguageOption[] = [

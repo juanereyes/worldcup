@@ -531,10 +531,14 @@ const languageOptions: LanguageOption[] = [
   }
 ];
 
-const authClientUrl = "http://127.0.0.1:5174/";
-const authApiUrl = "http://127.0.0.1:8001";
-const matchesApiUrl = "http://127.0.0.1:8002";
-const lobbiesApiUrl = "http://127.0.0.1:8003";
+const ensureTrailingSlash = (url: string) => (url.endsWith("/") ? url : `${url}/`);
+
+const authClientUrl = ensureTrailingSlash(
+  import.meta.env.VITE_AUTH_CLIENT_URL ?? "http://127.0.0.1:5174/"
+);
+const authApiUrl = import.meta.env.VITE_AUTH_API_URL ?? "http://127.0.0.1:8001";
+const matchesApiUrl = import.meta.env.VITE_MATCHES_API_URL ?? "http://127.0.0.1:8002";
+const lobbiesApiUrl = import.meta.env.VITE_LOBBIES_API_URL ?? "http://127.0.0.1:8003";
 const lobbyCreationDraftStorageKey = "worldcup-lobby-creation-draft";
 const defaultPredictionLobbyCode = "__default__";
 const defaultCustomSettingValues: Record<CustomNumericFieldId, string> = {
