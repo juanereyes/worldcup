@@ -4,7 +4,7 @@ import json
 import os
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -84,6 +84,15 @@ class FinishedMatch:
 
 
 @dataclass(frozen=True)
+class MatchSchedule:
+    id: int
+    stage: str
+    group: str | None
+    utc_date: datetime
+    status: str
+
+
+@dataclass(frozen=True)
 class PlayerStat:
     country: str
     name: str
@@ -95,6 +104,10 @@ class PlayerStat:
 
 
 class AuthenticationError(ValueError):
+    pass
+
+
+class PredictionWindowError(ValueError):
     pass
 
 
@@ -135,19 +148,46 @@ def validate_auth_session(cookie_header: str) -> dict[str, Any]:
     return user
 
 
-def fetch_finished_matches() -> dict[int, FinishedMatch]:
+def fetch_all_match_payloads() -> list[dict[str, Any]]:
     request = Request(MATCHES_URL, headers={"Accept": "application/json"}, method="GET")
 
     try:
         with urlopen(request, timeout=4) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (HTTPError, OSError, URLError, json.JSONDecodeError) as error:
-        raise RuntimeError("Could not load match results for the scoreboard.") from error
+        raise RuntimeError("Could not load World Cup matches.") from error
 
     raw_matches = payload.get("matches") if isinstance(payload, dict) else None
 
     if not isinstance(raw_matches, list):
-        raise RuntimeError("Match results payload is invalid.")
+        raise RuntimeError("Match payload is invalid.")
+
+    return [match for match in raw_matches if isinstance(match, dict)]
+
+
+def fetch_match_schedule() -> dict[int, MatchSchedule]:
+    schedule: dict[int, MatchSchedule] = {}
+
+    for raw_match in fetch_all_match_payloads():
+        try:
+            match_id = int(raw_match.get("id"))
+            utc_date = parse_utc_datetime(str(raw_match.get("utcDate", "")))
+        except (TypeError, ValueError):
+            continue
+
+        schedule[match_id] = MatchSchedule(
+            id=match_id,
+            stage=str(raw_match.get("stage", "")),
+            group=raw_match.get("group") if isinstance(raw_match.get("group"), str) else None,
+            utc_date=utc_date,
+            status=str(raw_match.get("status", "")),
+        )
+
+    return schedule
+
+
+def fetch_finished_matches() -> dict[int, FinishedMatch]:
+    raw_matches = fetch_all_match_payloads()
 
     finished_matches: dict[int, FinishedMatch] = {}
 
@@ -181,13 +221,122 @@ def fetch_finished_matches() -> dict[int, FinishedMatch]:
     return finished_matches
 
 
+def parse_utc_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
+
+
 def match_bogota_date(utc_date: str) -> str:
     try:
-        parsed = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
+        parsed = parse_utc_datetime(utc_date)
     except ValueError:
         return ""
 
     return parsed.astimezone(BOGOTA_TZ).date().isoformat()
+
+
+def current_utc_datetime() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def parse_database_timestamp(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
+
+
+def current_member_joined_at(lobby: LobbyRecord, user_id: int) -> datetime | None:
+    member = next((member for member in lobby.members if member.user_id == user_id), None)
+
+    if member is None or not member.joined_at:
+        return None
+
+    try:
+        return parse_database_timestamp(member.joined_at)
+    except ValueError:
+        return None
+
+
+def first_match_start(schedule: dict[int, MatchSchedule]) -> datetime | None:
+    dates = [match.utc_date for match in schedule.values()]
+    return min(dates) if dates else None
+
+
+def global_prediction_closes_at(
+    lobby: LobbyRecord,
+    user_id: int,
+    schedule: dict[int, MatchSchedule],
+) -> datetime | None:
+    first_start = first_match_start(schedule)
+    joined_at = current_member_joined_at(lobby, user_id)
+
+    if first_start is None and joined_at is None:
+        return None
+
+    joined_deadline = joined_at + timedelta(hours=24) if joined_at else None
+    deadlines = [deadline for deadline in [first_start, joined_deadline] if deadline is not None]
+
+    return max(deadlines) if deadlines else None
+
+
+def ensure_match_prediction_open(match_id: int, schedule: dict[int, MatchSchedule]) -> None:
+    match = schedule.get(match_id)
+
+    if match is None:
+        raise PredictionWindowError("Match schedule is not available.")
+
+    if current_utc_datetime() >= match.utc_date:
+        raise PredictionWindowError("Match predictions are closed for this match.")
+
+
+def ensure_global_prediction_open(lobby: LobbyRecord, user_id: int, schedule: dict[int, MatchSchedule]) -> None:
+    closes_at = global_prediction_closes_at(lobby, user_id, schedule)
+
+    if closes_at is None:
+        raise PredictionWindowError("Prediction window is not available yet.")
+
+    if current_utc_datetime() >= closes_at:
+        raise PredictionWindowError("This prediction window is already closed.")
+
+
+def bracket_heavy_window_state(schedule: dict[int, MatchSchedule]) -> str:
+    group_matches = [match for match in schedule.values() if is_group_stage_schedule(match)]
+    knockout_matches = [match for match in schedule.values() if not is_group_stage_schedule(match)]
+
+    if not group_matches or not knockout_matches:
+        return "awaiting"
+
+    first_knockout_start = min(match.utc_date for match in knockout_matches)
+
+    if current_utc_datetime() >= first_knockout_start:
+        return "closed"
+
+    if all(match.status == "FINISHED" for match in group_matches):
+        return "open"
+
+    return "awaiting"
+
+
+def ensure_bracket_heavy_prediction_open(schedule: dict[int, MatchSchedule]) -> None:
+    state = bracket_heavy_window_state(schedule)
+
+    if state == "open":
+        return
+
+    if state == "awaiting":
+        raise PredictionWindowError("Bracket predictions are not open yet.")
+
+    raise PredictionWindowError("Bracket predictions are already closed.")
 
 
 def build_scoreboard_payload(
@@ -734,6 +883,10 @@ def is_group_stage_match(match: FinishedMatch) -> bool:
     return match.group is not None or match.stage == "Group Stage"
 
 
+def is_group_stage_schedule(match: MatchSchedule) -> bool:
+    return match.group is not None or match.stage == "Group Stage"
+
+
 def sort_scoreboard_rows(rows: Any, points_key: str) -> list[dict[str, Any]]:
     return [
         row
@@ -1098,10 +1251,14 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
             try:
                 authenticated_user = self.get_authenticated_user()
+                user_id = int(authenticated_user["id"])
+                get_lobby_for_member(connection, code=code, user_id=user_id)
+                schedule = fetch_match_schedule()
+                ensure_match_prediction_open(match_id, schedule)
                 prediction = save_match_prediction(
                     connection,
                     code=code,
-                    user_id=int(authenticated_user["id"]),
+                    user_id=user_id,
                     match_id=match_id,
                     home_score=home_score,
                     away_score=away_score,
@@ -1114,6 +1271,12 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
             except LobbyPermissionError as error:
                 self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+            except PredictionWindowError as error:
+                self.send_json(403, {"code": "prediction_window_closed", "error": str(error)})
+                return
+            except RuntimeError as error:
+                self.send_json(502, {"error": str(error)})
                 return
             except ValueError as error:
                 self.send_json(400, {"error": str(error)})
@@ -1161,10 +1324,17 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
             try:
                 authenticated_user = self.get_authenticated_user()
+                user_id = int(authenticated_user["id"])
+                lobby = get_lobby_for_member(connection, code=code, user_id=user_id)
+                schedule = fetch_match_schedule()
+                if prediction_type == "bracketHeavy":
+                    ensure_bracket_heavy_prediction_open(schedule)
+                else:
+                    ensure_global_prediction_open(lobby, user_id, schedule)
                 prediction = save_special_prediction(
                     connection,
                     code=code,
-                    user_id=int(authenticated_user["id"]),
+                    user_id=user_id,
                     prediction_type=prediction_type,
                     team_name=payload.get("teamName") if isinstance(payload.get("teamName"), str) else None,
                     player_country=payload.get("playerCountry") if isinstance(payload.get("playerCountry"), str) else None,
@@ -1180,6 +1350,12 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
             except LobbyPermissionError as error:
                 self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+            except PredictionWindowError as error:
+                self.send_json(403, {"code": "prediction_window_closed", "error": str(error)})
+                return
+            except RuntimeError as error:
+                self.send_json(502, {"error": str(error)})
                 return
             except ValueError as error:
                 self.send_json(400, {"error": str(error)})
@@ -1212,6 +1388,8 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
             try:
                 authenticated_user = self.get_authenticated_user()
+                schedule = fetch_match_schedule()
+                ensure_match_prediction_open(match_id, schedule)
                 prediction = save_default_match_prediction(
                     connection,
                     user_id=int(authenticated_user["id"]),
@@ -1221,6 +1399,12 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 )
             except AuthenticationError as error:
                 self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+            except PredictionWindowError as error:
+                self.send_json(403, {"code": "prediction_window_closed", "error": str(error)})
+                return
+            except RuntimeError as error:
+                self.send_json(502, {"error": str(error)})
                 return
             except ValueError as error:
                 self.send_json(400, {"error": str(error)})
@@ -1258,11 +1442,17 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
 
             try:
                 authenticated_user = self.get_authenticated_user()
+                schedule = fetch_match_schedule()
+                open_match_ids = [
+                    match_id
+                    for match_id in (match_ids or [match.id for match in schedule.values()])
+                    if match_id in schedule and current_utc_datetime() < schedule[match_id].utc_date
+                ]
                 predictions = copy_default_predictions_to_lobby(
                     connection,
                     code=code,
                     user_id=int(authenticated_user["id"]),
-                    match_ids=match_ids,
+                    match_ids=open_match_ids,
                 )
             except AuthenticationError as error:
                 self.send_json(401, {"code": "not_authenticated", "error": str(error)})
@@ -1272,6 +1462,9 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
             except LobbyPermissionError as error:
                 self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+            except RuntimeError as error:
+                self.send_json(502, {"error": str(error)})
                 return
 
         self.send_json(200, {"predictions": [self.match_prediction_payload(prediction) for prediction in predictions]})
@@ -1447,6 +1640,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     "userId": member.user_id,
                     "username": member.username,
                     "role": member.role,
+                    "joinedAt": member.joined_at,
                 }
                 for member in lobby.members
             ],

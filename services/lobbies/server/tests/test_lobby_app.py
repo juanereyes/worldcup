@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from app import AuthenticationError, FinishedMatch, build_scoreboard_payload, validate_auth_session
+from app import (
+    AuthenticationError,
+    FinishedMatch,
+    MatchSchedule,
+    bracket_heavy_window_state,
+    build_scoreboard_payload,
+    global_prediction_closes_at,
+    validate_auth_session,
+)
 from lobby_service.database import LobbyMemberRecord, LobbyRecord, MemberMatchPredictionRecord, MemberSpecialPredictionRecord
 
 
@@ -49,6 +58,74 @@ class LobbyAuthValidationTest(unittest.TestCase):
         with patch("app.urlopen", side_effect=error):
             with self.assertRaises(AuthenticationError):
                 validate_auth_session("worldcup_auth_session=bad-token")
+
+
+class PredictionTimingTest(unittest.TestCase):
+    def test_global_prediction_closes_at_later_of_first_match_and_joined_plus_24_hours(self) -> None:
+        lobby = LobbyRecord(
+            code="ABCD",
+            name="Friends",
+            requires_password=False,
+            member_count=1,
+            point_system="simple",
+            custom_settings=None,
+            members=[
+                LobbyMemberRecord(
+                    user_id=1,
+                    username="ana",
+                    role="admin",
+                    joined_at="2026-06-11 18:30:00",
+                )
+            ],
+        )
+        schedule = {
+            10: MatchSchedule(
+                id=10,
+                stage="Group Stage",
+                group="Group A",
+                utc_date=datetime(2026, 6, 11, 19, 0, tzinfo=timezone.utc),
+                status="TIMED",
+            )
+        }
+
+        closes_at = global_prediction_closes_at(lobby, 1, schedule)
+
+        self.assertEqual(closes_at, datetime(2026, 6, 12, 18, 30, tzinfo=timezone.utc))
+
+    def test_bracket_heavy_opens_after_groups_finish_before_knockouts_start(self) -> None:
+        schedule = {
+            10: MatchSchedule(
+                id=10,
+                stage="Group Stage",
+                group="Group A",
+                utc_date=datetime(2026, 6, 28, 2, 0, tzinfo=timezone.utc),
+                status="FINISHED",
+            ),
+            20: MatchSchedule(
+                id=20,
+                stage="Last 32",
+                group=None,
+                utc_date=datetime(2026, 6, 28, 19, 0, tzinfo=timezone.utc),
+                status="TIMED",
+            ),
+        }
+
+        with patch("app.current_utc_datetime", return_value=datetime(2026, 6, 28, 18, 0, tzinfo=timezone.utc)):
+            self.assertEqual(bracket_heavy_window_state(schedule), "open")
+
+        with patch("app.current_utc_datetime", return_value=datetime(2026, 6, 28, 20, 0, tzinfo=timezone.utc)):
+            self.assertEqual(bracket_heavy_window_state(schedule), "closed")
+
+        schedule[10] = MatchSchedule(
+            id=10,
+            stage="Group Stage",
+            group="Group A",
+            utc_date=datetime(2026, 6, 28, 2, 0, tzinfo=timezone.utc),
+            status="TIMED",
+        )
+
+        with patch("app.current_utc_datetime", return_value=datetime(2026, 6, 28, 18, 0, tzinfo=timezone.utc)):
+            self.assertEqual(bracket_heavy_window_state(schedule), "awaiting")
 
 
 class LobbyScoreboardTest(unittest.TestCase):

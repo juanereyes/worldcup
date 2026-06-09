@@ -65,6 +65,7 @@ class LobbyMemberRecord:
     user_id: int
     username: str
     role: str
+    joined_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -539,7 +540,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
 
     rows = connection.execute(
         """
-        SELECT user_id, username, role
+        SELECT user_id, username, role, joined_at
         FROM lobby_members
         WHERE lobby_code = ?
         ORDER BY role = 'admin' DESC, joined_at ASC, username COLLATE NOCASE ASC
@@ -559,6 +560,7 @@ def get_lobby(connection: sqlite3.Connection, code: str) -> LobbyRecord:
                 user_id=int(row["user_id"]),
                 username=str(row["username"]),
                 role=str(row["role"]),
+                joined_at=str(row["joined_at"]),
             )
             for row in rows
         ],

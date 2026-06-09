@@ -117,6 +117,7 @@ type LobbyMember = {
   userId: number;
   username: string;
   role: "admin" | "member";
+  joinedAt?: string;
 };
 
 type Lobby = {
@@ -384,6 +385,13 @@ type Copy = {
     scoreboardEmpty: string;
     scoreboardUser: string;
     scoreboardPoints: string;
+    predictionWindowAwaiting: string;
+    predictionWindowOpen: string;
+    predictionWindowClosed: string;
+    globalWindowOpenUntil: (time: string) => string;
+    bracketWindowAwaiting: string;
+    bracketWindowOpen: string;
+    bracketWindowClosed: string;
   };
   lobbyActions: {
     joinTitle: string;
@@ -447,6 +455,7 @@ type Copy = {
     saveSaving: string;
     saveSaved: string;
     saveError: string;
+    matchClosed: string;
     homeScore: string;
     awayScore: string;
   };
@@ -1004,7 +1013,14 @@ const copy: Record<Language, Copy> = {
       scoreboardError: "The scoreboard is not available right now.",
       scoreboardEmpty: "No scored predictions yet.",
       scoreboardUser: "User",
-      scoreboardPoints: "Points"
+      scoreboardPoints: "Points",
+      predictionWindowAwaiting: "This prediction window is waiting to open.",
+      predictionWindowOpen: "This prediction window is currently open.",
+      predictionWindowClosed: "This prediction window is already closed.",
+      globalWindowOpenUntil: (time) => `This prediction window is currently open until ${time}.`,
+      bracketWindowAwaiting: "Bracket heavy opens after every group-stage match is finished.",
+      bracketWindowOpen: "Bracket heavy is currently open until the first knockout match begins.",
+      bracketWindowClosed: "Bracket heavy is already closed because the knockout stage has started."
     },
     lobbyActions: {
       joinTitle: "Join a group",
@@ -1068,6 +1084,7 @@ const copy: Record<Language, Copy> = {
       saveSaving: "Saving...",
       saveSaved: "Saved",
       saveError: "Could not save",
+      matchClosed: "Closed",
       homeScore: "Home score",
       awayScore: "Away score"
     },
@@ -1356,7 +1373,14 @@ const copy: Record<Language, Copy> = {
       scoreboardError: "La tabla de puntos no está disponible en este momento.",
       scoreboardEmpty: "Todavía no hay pronósticos con puntos.",
       scoreboardUser: "Usuario",
-      scoreboardPoints: "Puntos"
+      scoreboardPoints: "Puntos",
+      predictionWindowAwaiting: "Esta ventana de pronóstico está esperando a abrir.",
+      predictionWindowOpen: "Esta ventana de pronóstico está abierta.",
+      predictionWindowClosed: "Esta ventana de pronóstico ya está cerrada.",
+      globalWindowOpenUntil: (time) => `Esta ventana de pronóstico está abierta hasta ${time}.`,
+      bracketWindowAwaiting: "La llave pesada abre cuando terminen todos los partidos de fase de grupos.",
+      bracketWindowOpen: "La llave pesada está abierta hasta que empiece el primer partido de eliminación directa.",
+      bracketWindowClosed: "La llave pesada ya cerró porque empezó la fase eliminatoria."
     },
     lobbyActions: {
       joinTitle: "Unirse a un grupo",
@@ -1420,6 +1444,7 @@ const copy: Record<Language, Copy> = {
       saveSaving: "Guardando...",
       saveSaved: "Guardado",
       saveError: "No se pudo guardar",
+      matchClosed: "Cerrado",
       homeScore: "Goles local",
       awayScore: "Goles visitante"
     },
@@ -2026,6 +2051,104 @@ const getMatchTime = (utcDate: string, language: Language) => {
   }
 
   return formatBogotaTime(date, language);
+};
+
+type PredictionWindowState = "awaiting" | "open" | "closed";
+
+const parseTimestamp = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const timestamp = new Date(normalized).getTime();
+
+  return Number.isNaN(timestamp) ? null : timestamp;
+};
+
+const isMatchPredictionOpen = (match: CarouselMatch) => Date.now() < new Date(match.utcDate).getTime();
+
+const getFirstMatchStart = () => {
+  const timestamps = allMatches
+    .map((match) => new Date(match.utcDate).getTime())
+    .filter((timestamp) => !Number.isNaN(timestamp));
+
+  return timestamps.length > 0 ? Math.min(...timestamps) : null;
+};
+
+const getCurrentUserLobbyMember = (lobby: Lobby | null = currentLobby) =>
+  currentUser && lobby ? lobby.members.find((member) => member.userId === currentUser?.id) ?? null : null;
+
+const getGlobalPredictionCloseTime = (lobby: Lobby | null = currentLobby) => {
+  const firstMatchStart = getFirstMatchStart();
+  const joinedAt = parseTimestamp(getCurrentUserLobbyMember(lobby)?.joinedAt);
+  const joinedDeadline = joinedAt === null ? null : joinedAt + 24 * 60 * 60 * 1000;
+  const deadlines = [firstMatchStart, joinedDeadline].filter((timestamp): timestamp is number => timestamp !== null);
+
+  return deadlines.length > 0 ? Math.max(...deadlines) : null;
+};
+
+const getGlobalPredictionWindowState = (lobby: Lobby | null = currentLobby): PredictionWindowState => {
+  const closesAt = getGlobalPredictionCloseTime(lobby);
+
+  if (closesAt === null) {
+    return "awaiting";
+  }
+
+  return Date.now() < closesAt ? "open" : "closed";
+};
+
+const isGroupStageMatch = (match: CarouselMatch) => Boolean(match.group) || match.stage === "Group Stage";
+
+const getBracketHeavyWindowState = (): PredictionWindowState => {
+  const groupMatches = allMatches.filter(isGroupStageMatch);
+  const knockoutMatches = allMatches.filter((match) => !isGroupStageMatch(match));
+
+  if (groupMatches.length === 0 || knockoutMatches.length === 0) {
+    return "awaiting";
+  }
+
+  const firstKnockoutStart = Math.min(...knockoutMatches.map((match) => new Date(match.utcDate).getTime()));
+
+  if (Date.now() >= firstKnockoutStart) {
+    return "closed";
+  }
+
+  return groupMatches.every((match) => match.status === "FINISHED") ? "open" : "awaiting";
+};
+
+const formatWindowTime = (timestamp: number | null, language: Language) => {
+  if (timestamp === null) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat(language === "es" ? "es-CO" : "en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Bogota"
+  }).format(new Date(timestamp));
+};
+
+const getGlobalPredictionWindowMessage = (selectedCopy: Copy, language: Language, lobby: Lobby | null = currentLobby) => {
+  const state = getGlobalPredictionWindowState(lobby);
+
+  if (state === "open") {
+    return selectedCopy.lobbyPage.globalWindowOpenUntil(formatWindowTime(getGlobalPredictionCloseTime(lobby), language));
+  }
+
+  return state === "closed" ? selectedCopy.lobbyPage.predictionWindowClosed : selectedCopy.lobbyPage.predictionWindowAwaiting;
+};
+
+const getBracketHeavyWindowMessage = (selectedCopy: Copy) => {
+  const state = getBracketHeavyWindowState();
+
+  if (state === "open") {
+    return selectedCopy.lobbyPage.bracketWindowOpen;
+  }
+
+  return state === "closed" ? selectedCopy.lobbyPage.bracketWindowClosed : selectedCopy.lobbyPage.bracketWindowAwaiting;
 };
 
 const getMatchStatusLabel = (status: string, selectedCopy: Copy) => {
@@ -2651,6 +2774,8 @@ const getPredictionSaveLabel = (selectedCopy: Copy, matchId: number) => {
 
 const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, language: Language) => {
   const saveState = predictionSaveStates[match.id] ?? "idle";
+  const isOpen = isMatchPredictionOpen(match);
+  const disabledAttribute = isOpen ? "" : "disabled";
 
   return `
     <article class="prediction-match-card">
@@ -2670,6 +2795,7 @@ const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, lan
             data-prediction-match="${match.id}"
             data-prediction-side="home"
             value="${getPredictionValue(match.id, "home")}"
+            ${disabledAttribute}
           />
         </label>
         <label class="prediction-team-row">
@@ -2683,10 +2809,13 @@ const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, lan
             data-prediction-match="${match.id}"
             data-prediction-side="away"
             value="${getPredictionValue(match.id, "away")}"
+            ${disabledAttribute}
           />
         </label>
       </div>
-      <p class="prediction-save-state is-${saveState}" data-prediction-save-state="${match.id}">${getPredictionSaveLabel(selectedCopy, match.id)}</p>
+      <p class="prediction-save-state is-${isOpen ? saveState : "idle"}" data-prediction-save-state="${match.id}">
+        ${isOpen ? getPredictionSaveLabel(selectedCopy, match.id) : selectedCopy.predictionsPage.matchClosed}
+      </p>
     </article>
   `;
 };
@@ -3031,10 +3160,11 @@ const renderBracketHeavyTeam = (
   teamName: string | null,
   teamIndex: number,
   language: Language,
-  selections: Record<string, string>
+  selections: Record<string, string>,
+  isWindowOpen: boolean
 ) => {
   const teamSlot = getBracketHeavyTeamSlot(match, teamIndex);
-  const isSelectable = Boolean(teamName && teamSlot);
+  const isSelectable = Boolean(isWindowOpen && teamName && teamSlot);
   const isSelected = Boolean(isSelectable && selections[match.key] === teamSlot);
 
   return `
@@ -3052,17 +3182,18 @@ const renderBracketHeavyTeam = (
 const renderBracketHeavyMatch = (
   match: BracketHeavyMatch,
   language: Language,
-  selections: Record<string, string>
+  selections: Record<string, string>,
+  isWindowOpen: boolean
 ) => `
   <article class="bracket-heavy-match">
-    ${renderBracketHeavyTeam(match, match.teams[0], 0, language, selections)}
-    ${renderBracketHeavyTeam(match, match.teams[1], 1, language, selections)}
+    ${renderBracketHeavyTeam(match, match.teams[0], 0, language, selections, isWindowOpen)}
+    ${renderBracketHeavyTeam(match, match.teams[1], 1, language, selections, isWindowOpen)}
   </article>
 `;
 
 const getBracketHeavyRoundClass = (stage: string) => stage.toLowerCase().replace(/\s+/g, "-");
 
-const renderBracketHeavySide = (language: Language, side: "left" | "right", selections: Record<string, string>) => {
+const renderBracketHeavySide = (language: Language, side: "left" | "right", selections: Record<string, string>, isWindowOpen: boolean) => {
   const stages = side === "left" ? bracketHeavySideStages : [...bracketHeavySideStages].reverse();
   const rounds = getBracketHeavySideMatches(side, selections);
 
@@ -3076,7 +3207,7 @@ const renderBracketHeavySide = (language: Language, side: "left" | "right", sele
             <section class="bracket-heavy-round bracket-heavy-round-${getBracketHeavyRoundClass(stage)}" aria-label="${localizeStageLabel(stage, language)}">
               <h3>${localizeStageLabel(stage, language)}</h3>
               <div class="bracket-heavy-round-matches">
-                ${matches.map((match) => renderBracketHeavyMatch(match, language, selections)).join("")}
+                ${matches.map((match) => renderBracketHeavyMatch(match, language, selections, isWindowOpen)).join("")}
               </div>
             </section>
           `;
@@ -3086,7 +3217,7 @@ const renderBracketHeavySide = (language: Language, side: "left" | "right", sele
   `;
 };
 
-const renderBracketHeavyCenter = (language: Language, selections: Record<string, string>) => {
+const renderBracketHeavyCenter = (language: Language, selections: Record<string, string>, isWindowOpen: boolean) => {
   const centerMatches = getBracketHeavyCenterMatches(selections);
 
   return `
@@ -3094,13 +3225,13 @@ const renderBracketHeavyCenter = (language: Language, selections: Record<string,
       <section class="bracket-heavy-round bracket-heavy-final-round" aria-label="${localizeStageLabel("Final", language)}">
         <h3>${localizeStageLabel("Final", language)}</h3>
         <div class="bracket-heavy-round-matches">
-          ${centerMatches.final.map((match) => renderBracketHeavyMatch(match, language, selections)).join("")}
+          ${centerMatches.final.map((match) => renderBracketHeavyMatch(match, language, selections, isWindowOpen)).join("")}
         </div>
       </section>
       <section class="bracket-heavy-round bracket-heavy-third-round" aria-label="${localizeStageLabel("Third Place", language)}">
         <h3>${localizeStageLabel("Third Place", language)}</h3>
         <div class="bracket-heavy-round-matches">
-          ${centerMatches.thirdPlace.map((match) => renderBracketHeavyMatch(match, language, selections)).join("")}
+          ${centerMatches.thirdPlace.map((match) => renderBracketHeavyMatch(match, language, selections, isWindowOpen)).join("")}
         </div>
       </section>
     </div>
@@ -3114,6 +3245,7 @@ const renderBracketHeavyModal = (selectedCopy: Copy, language: Language) => {
 
   const hasKnockoutMatches = getKnockoutMatches().length > 0;
   const selections = getStoredBracketHeavySelections(currentLobby);
+  const isWindowOpen = getBracketHeavyWindowState() === "open";
 
   return `
     <div class="modal-backdrop bracket-heavy-backdrop" role="presentation" id="bracket-heavy-backdrop">
@@ -3124,6 +3256,7 @@ const renderBracketHeavyModal = (selectedCopy: Copy, language: Language) => {
             &times;
           </button>
         </div>
+        <p class="join-lobby-message">${getBracketHeavyWindowMessage(selectedCopy)}</p>
         ${
           isAllMatchesLoading
             ? `<div class="matches-state">${selectedCopy.bracketPage.loading}</div>`
@@ -3132,9 +3265,9 @@ const renderBracketHeavyModal = (selectedCopy: Copy, language: Language) => {
               : !hasKnockoutMatches
                 ? `<div class="matches-state">${selectedCopy.bracketPage.empty}</div>`
                 : `<div class="bracket-heavy-board">
-                    ${renderBracketHeavySide(language, "left", selections)}
-                    ${renderBracketHeavyCenter(language, selections)}
-                    ${renderBracketHeavySide(language, "right", selections)}
+                    ${renderBracketHeavySide(language, "left", selections, isWindowOpen)}
+                    ${renderBracketHeavyCenter(language, selections, isWindowOpen)}
+                    ${renderBracketHeavySide(language, "right", selections, isWindowOpen)}
                   </div>`
         }
       </section>
@@ -3847,6 +3980,8 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
   const teams = getParticipatingTeams(language);
   const selectedTeam = teams.find((team) => team.team.en === globalPlacementPredictionModal.selectedTeam);
   const predictionLabel = getGlobalPlacementPredictionLabel(selectedCopy, globalPlacementPredictionModal.predictionId);
+  const windowState = getGlobalPredictionWindowState(currentLobby);
+  const isOpen = windowState === "open";
   const searchQuery = globalPlacementPredictionModal.searchQuery.trim().toLocaleLowerCase();
   const filteredTeams = teams.filter((team) => {
     const searchableNames = [team.team.en, team.team.es].map((name) => name.toLocaleLowerCase());
@@ -3863,6 +3998,7 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
           </button>
         </div>
         <p class="leave-lobby-body">${selectedCopy.lobbyPage.chooseGlobalPrediction(predictionLabel)}</p>
+        <p class="join-lobby-message">${getGlobalPredictionWindowMessage(selectedCopy, language, currentLobby)}</p>
         <div class="tracked-team-control global-placement-country-control">
           <span>${selectedCopy.lobbyPage.chooseCountry}</span>
           <button
@@ -3870,6 +4006,7 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
             type="button"
             id="global-placement-team-trigger"
             aria-expanded="${globalPlacementPredictionModal.isMenuOpen ? "true" : "false"}"
+            ${isOpen ? "" : "disabled"}
           >
             ${
               selectedTeam
@@ -3885,6 +4022,7 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
               autocomplete="off"
               placeholder="${selectedCopy.lobbyPage.searchCountry}"
               value="${globalPlacementPredictionModal.searchQuery}"
+              ${isOpen ? "" : "disabled"}
             />
             ${filteredTeams
               .map(
@@ -3893,6 +4031,7 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
                     type="button"
                     data-global-placement-team="${team.team.en}"
                     data-global-placement-search="${team.team.en.toLocaleLowerCase()}|${team.team.es.toLocaleLowerCase()}"
+                    ${isOpen ? "" : "disabled"}
                   >
                     <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
                     <span>${team.team[language]}</span>
@@ -3906,7 +4045,7 @@ const renderGlobalPlacementPredictionModal = (selectedCopy: Copy, language: Lang
           <button class="secondary-action" type="button" id="global-placement-cancel">
             ${selectedCopy.leaveLobby.cancel}
           </button>
-          <button class="primary-action" type="button" id="global-placement-confirm" ${globalPlacementPredictionModal.selectedTeam ? "" : "disabled"}>
+          <button class="primary-action" type="button" id="global-placement-confirm" ${isOpen && globalPlacementPredictionModal.selectedTeam ? "" : "disabled"}>
             ${selectedCopy.lobbyPage.confirmGlobalPrediction}
           </button>
         </div>
@@ -3999,6 +4138,8 @@ const renderTrackTeamPredictionModal = (selectedCopy: Copy, language: Language) 
   const trackedTeamDisplay = trackedTeam
     ? getTeamDisplayName(trackedTeam, language)
     : selectedCopy.customSettingsPage.trackedTeamLabel;
+  const windowState = getGlobalPredictionWindowState(trackTeamPredictionModal.lobby);
+  const isOpen = windowState === "open";
 
   return `
     <div class="modal-backdrop" role="presentation" id="track-team-prediction-backdrop">
@@ -4010,6 +4151,7 @@ const renderTrackTeamPredictionModal = (selectedCopy: Copy, language: Language) 
           </button>
         </div>
         <p class="leave-lobby-body choose-team-description">${selectedCopy.customSettingsPage.features.trackTeam.detail}</p>
+        <p class="join-lobby-message">${getGlobalPredictionWindowMessage(selectedCopy, language, trackTeamPredictionModal.lobby)}</p>
         <div class="tracked-team-control global-placement-country-control">
           <span>${selectedCopy.lobbyPage.chooseTrackTeamPhase(trackedTeamDisplay)}</span>
           <div class="tracked-team-menu phase-choice-menu" id="track-team-phase-menu">
@@ -4020,6 +4162,7 @@ const renderTrackTeamPredictionModal = (selectedCopy: Copy, language: Language) 
                     type="button"
                     data-track-team-phase="${phase}"
                     aria-current="${trackTeamPredictionModal.selectedPhase === phase ? "true" : "false"}"
+                    ${isOpen ? "" : "disabled"}
                   >
                     <span>${localizeMatchLabel(phase, language)}</span>
                   </button>
@@ -4032,7 +4175,7 @@ const renderTrackTeamPredictionModal = (selectedCopy: Copy, language: Language) 
           <button class="secondary-action" type="button" id="track-team-prediction-cancel">
             ${selectedCopy.leaveLobby.cancel}
           </button>
-          <button class="primary-action" type="button" id="track-team-prediction-confirm" ${trackTeamPredictionModal.selectedPhase ? "" : "disabled"}>
+          <button class="primary-action" type="button" id="track-team-prediction-confirm" ${isOpen && trackTeamPredictionModal.selectedPhase ? "" : "disabled"}>
             ${selectedCopy.lobbyPage.confirmGlobalPrediction}
           </button>
         </div>
@@ -4048,6 +4191,8 @@ const renderChooseTeamModal = (selectedCopy: Copy, language: Language) => {
 
   const teams = getParticipatingTeams(language);
   const selectedTeam = teams.find((team) => team.team.en === chooseTeamModal.selectedTeam);
+  const windowState = getGlobalPredictionWindowState(chooseTeamModal.lobby);
+  const isOpen = windowState === "open";
   const searchQuery = chooseTeamModal.searchQuery.trim().toLocaleLowerCase();
   const filteredTeams = teams.filter((team) => {
     const searchableNames = [team.team.en, team.team.es].map((name) => name.toLocaleLowerCase());
@@ -4064,6 +4209,7 @@ const renderChooseTeamModal = (selectedCopy: Copy, language: Language) => {
           </button>
         </div>
         <p class="leave-lobby-body choose-team-description">${selectedCopy.customSettingsPage.features.chooseTeam.detail}</p>
+        <p class="join-lobby-message">${getGlobalPredictionWindowMessage(selectedCopy, language, chooseTeamModal.lobby)}</p>
         <div class="tracked-team-control global-placement-country-control">
           <span>${selectedCopy.lobbyPage.chooseCountry}</span>
           <button
@@ -4071,6 +4217,7 @@ const renderChooseTeamModal = (selectedCopy: Copy, language: Language) => {
             type="button"
             id="choose-team-modal-trigger"
             aria-expanded="${chooseTeamModal.isMenuOpen ? "true" : "false"}"
+            ${isOpen ? "" : "disabled"}
           >
             ${
               selectedTeam
@@ -4086,6 +4233,7 @@ const renderChooseTeamModal = (selectedCopy: Copy, language: Language) => {
               autocomplete="off"
               placeholder="${selectedCopy.lobbyPage.searchCountry}"
               value="${chooseTeamModal.searchQuery}"
+              ${isOpen ? "" : "disabled"}
             />
             ${filteredTeams
               .map(
@@ -4094,6 +4242,7 @@ const renderChooseTeamModal = (selectedCopy: Copy, language: Language) => {
                     type="button"
                     data-choose-team="${team.team.en}"
                     data-choose-team-search="${team.team.en.toLocaleLowerCase()}|${team.team.es.toLocaleLowerCase()}"
+                    ${isOpen ? "" : "disabled"}
                   >
                     <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
                     <span>${team.team[language]}</span>
@@ -4107,7 +4256,7 @@ const renderChooseTeamModal = (selectedCopy: Copy, language: Language) => {
           <button class="secondary-action" type="button" id="choose-team-cancel">
             ${selectedCopy.leaveLobby.cancel}
           </button>
-          <button class="primary-action" type="button" id="choose-team-confirm" ${chooseTeamModal.selectedTeam ? "" : "disabled"}>
+          <button class="primary-action" type="button" id="choose-team-confirm" ${isOpen && chooseTeamModal.selectedTeam ? "" : "disabled"}>
             ${selectedCopy.lobbyPage.confirmGlobalPrediction}
           </button>
         </div>
@@ -4124,6 +4273,8 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
   const teams = getParticipatingTeams(language);
   const selectedTeam = teams.find((team) => team.team.en === playerPredictionModal.selectedCountry);
   const predictionLabel = getPlayerPredictionLabel(selectedCopy, playerPredictionModal.predictionId);
+  const windowState = getGlobalPredictionWindowState(playerPredictionModal.lobby);
+  const isOpen = windowState === "open";
   const countrySearchQuery = playerPredictionModal.countrySearchQuery.trim().toLocaleLowerCase();
   const playerSearchQuery = normalizeSearchText(playerPredictionModal.playerSearchQuery.trim());
   const players = playerPredictionModal.selectedCountry
@@ -4161,6 +4312,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
           </button>
         </div>
         <p class="leave-lobby-body">${selectedCopy.lobbyPage.choosePlayerPrediction(predictionLabel)}</p>
+        <p class="join-lobby-message">${getGlobalPredictionWindowMessage(selectedCopy, language, playerPredictionModal.lobby)}</p>
         <div class="tracked-team-control global-placement-country-control">
           <span>${selectedCopy.lobbyPage.chooseCountry}</span>
           <button
@@ -4168,6 +4320,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
             type="button"
             id="player-country-trigger"
             aria-expanded="${playerPredictionModal.isCountryMenuOpen ? "true" : "false"}"
+            ${isOpen ? "" : "disabled"}
           >
             ${
               selectedTeam
@@ -4183,6 +4336,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
               autocomplete="off"
               placeholder="${selectedCopy.lobbyPage.searchCountry}"
               value="${playerPredictionModal.countrySearchQuery}"
+              ${isOpen ? "" : "disabled"}
             />
             ${filteredTeams
               .map(
@@ -4191,6 +4345,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
                     type="button"
                     data-player-country="${team.team.en}"
                     data-player-country-search="${team.team.en.toLocaleLowerCase()}|${team.team.es.toLocaleLowerCase()}"
+                    ${isOpen ? "" : "disabled"}
                   >
                     <img src="${team.flagSrc}" alt="${team.flagAlt[language]}" />
                     <span>${team.team[language]}</span>
@@ -4207,6 +4362,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
             type="button"
             id="player-name-trigger"
             aria-expanded="${playerPredictionModal.isPlayerMenuOpen ? "true" : "false"}"
+            ${isOpen ? "" : "disabled"}
           >
             ${
               selectedPlayer
@@ -4222,6 +4378,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
               autocomplete="off"
               placeholder="${selectedCopy.lobbyPage.searchPlayer}"
               value="${playerPredictionModal.playerSearchQuery}"
+              ${isOpen ? "" : "disabled"}
             />
             ${
               filteredPlayers
@@ -4233,6 +4390,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
                       data-player-name="${escapeHtml(player.name)}"
                       data-player-number="${player.number}"
                       data-player-search="${escapeHtml([normalizeSearchText(player.name), ...normalizeSearchText(player.name).split(/\s+/), normalizeSearchText(player.country), ...normalizeSearchText(player.country).split(/\s+/), String(player.number)].join("|"))}"
+                      ${isOpen ? "" : "disabled"}
                     >
                       <span class="player-option-number">#${player.number}</span>
                       <span>${escapeHtml(player.name)}</span>
@@ -4248,7 +4406,7 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
           <button class="secondary-action" type="button" id="player-prediction-cancel">
             ${selectedCopy.leaveLobby.cancel}
           </button>
-          <button class="primary-action" type="button" id="player-prediction-confirm" ${selectedPlayer ? "" : "disabled"}>
+          <button class="primary-action" type="button" id="player-prediction-confirm" ${isOpen && selectedPlayer ? "" : "disabled"}>
             ${selectedCopy.lobbyPage.confirmGlobalPrediction}
           </button>
         </div>
@@ -4954,6 +5112,10 @@ const render = (language: Language) => {
       return;
     }
 
+    if (getGlobalPredictionWindowState(currentLobby) !== "open") {
+      return;
+    }
+
     const lobby = currentLobby;
     const predictionId = globalPlacementPredictionModal.predictionId;
     const selectedTeam = globalPlacementPredictionModal.selectedTeam;
@@ -4987,6 +5149,17 @@ const render = (language: Language) => {
       const side = input.dataset.predictionSide === "away" ? "away" : "home";
 
       if (!Number.isInteger(matchId) || matchId <= 0) {
+        return;
+      }
+
+      const match = allMatches.find((candidate) => candidate.id === matchId);
+
+      if (!match || !isMatchPredictionOpen(match)) {
+        predictionSaveStates = {
+          ...predictionSaveStates,
+          [matchId]: "error"
+        };
+        updatePredictionSaveIndicator(matchId);
         return;
       }
 
@@ -5220,6 +5393,10 @@ const render = (language: Language) => {
       return;
     }
 
+    if (getGlobalPredictionWindowState(trackTeamPredictionModal.lobby) !== "open") {
+      return;
+    }
+
     const lobby = trackTeamPredictionModal.lobby;
     const selectedPhase = trackTeamPredictionModal.selectedPhase;
 
@@ -5313,6 +5490,10 @@ const render = (language: Language) => {
 
   chooseTeamConfirmButton?.addEventListener("click", () => {
     if (!chooseTeamModal.lobby || !chooseTeamModal.selectedTeam) {
+      return;
+    }
+
+    if (getGlobalPredictionWindowState(chooseTeamModal.lobby) !== "open") {
       return;
     }
 
@@ -5509,6 +5690,10 @@ const render = (language: Language) => {
       return;
     }
 
+    if (getGlobalPredictionWindowState(playerPredictionModal.lobby) !== "open") {
+      return;
+    }
+
     const lobby = playerPredictionModal.lobby;
     const predictionId = playerPredictionModal.predictionId;
     const selection = {
@@ -5569,6 +5754,10 @@ const render = (language: Language) => {
   bracketHeavyTeamButtons.forEach((button) => {
     button.addEventListener("click", () => {
       if (!currentLobby) {
+        return;
+      }
+
+      if (getBracketHeavyWindowState() !== "open") {
         return;
       }
 
