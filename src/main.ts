@@ -1816,6 +1816,11 @@ const getPlayersForCountry = (country: string) =>
     .filter((player) => player.country === country)
     .sort((a, b) => a.number - b.number || a.name.localeCompare(b.name));
 
+const getAllPlayers = () =>
+  [...playerGuide].sort(
+    (a, b) => a.country.localeCompare(b.country) || a.number - b.number || a.name.localeCompare(b.name)
+  );
+
 const getStoredBracketHeavySelections = (lobby: Lobby): Record<string, string> => {
   const storedSelections = window.localStorage.getItem(getBracketHeavySelectionsStorageKey(lobby));
 
@@ -2404,7 +2409,6 @@ const renderCustomFeatureButtons = (selectedCopy: Copy, language: Language, lobb
             ? getStoredChooseTeam(lobby)
             : null;
       const selectedPlayer = feature === "favoritePlayer" ? getStoredPlayerPredictions(lobby).favoritePlayer : null;
-      const selectedPhase = feature === "trackTeam" ? getStoredTrackTeamPrediction(lobby) : "";
 
       return `
         <button
@@ -2417,7 +2421,6 @@ const renderCustomFeatureButtons = (selectedCopy: Copy, language: Language, lobb
         >
           <span>${selectedCopy.customSettingsPage.features[feature].label}</span>
           ${selectedTeam ? renderTeamBadge(selectedTeam, language) : ""}
-          ${selectedPhase ? `<span class="player-prediction-choice">${localizeMatchLabel(selectedPhase, language)}</span>` : ""}
           ${selectedPlayer ? `<span class="player-prediction-choice">#${selectedPlayer.number} ${escapeHtml(selectedPlayer.name)}</span>` : ""}
         </button>
       `;
@@ -4112,9 +4115,12 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
   const predictionLabel = getPlayerPredictionLabel(selectedCopy, playerPredictionModal.predictionId);
   const countrySearchQuery = playerPredictionModal.countrySearchQuery.trim().toLocaleLowerCase();
   const playerSearchQuery = normalizeSearchText(playerPredictionModal.playerSearchQuery.trim());
-  const players = playerPredictionModal.selectedCountry ? getPlayersForCountry(playerPredictionModal.selectedCountry) : [];
+  const players = playerPredictionModal.selectedCountry
+    ? getPlayersForCountry(playerPredictionModal.selectedCountry)
+    : getAllPlayers();
   const selectedPlayer = players.find(
     (player) =>
+      player.country === playerPredictionModal.selectedCountry &&
       player.name === playerPredictionModal.selectedPlayerName &&
       player.number === playerPredictionModal.selectedPlayerNumber
   );
@@ -4190,7 +4196,6 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
             type="button"
             id="player-name-trigger"
             aria-expanded="${playerPredictionModal.isPlayerMenuOpen ? "true" : "false"}"
-            ${playerPredictionModal.selectedCountry ? "" : "disabled"}
           >
             ${
               selectedPlayer
@@ -4213,12 +4218,14 @@ const renderPlayerPredictionModal = (selectedCopy: Copy, language: Language) => 
                   (player) => `
                     <button
                       type="button"
+                      data-player-country-name="${escapeHtml(player.country)}"
                       data-player-name="${escapeHtml(player.name)}"
                       data-player-number="${player.number}"
-                      data-player-search="${escapeHtml([normalizeSearchText(player.name), ...normalizeSearchText(player.name).split(/\s+/), String(player.number)].join("|"))}"
+                      data-player-search="${escapeHtml([normalizeSearchText(player.name), ...normalizeSearchText(player.name).split(/\s+/), normalizeSearchText(player.country), ...normalizeSearchText(player.country).split(/\s+/), String(player.number)].join("|"))}"
                     >
                       <span class="player-option-number">#${player.number}</span>
                       <span>${escapeHtml(player.name)}</span>
+                      ${playerPredictionModal.selectedCountry ? "" : `<span class="player-prediction-choice">${getTeamDisplayName(player.country, language)}</span>`}
                     </button>
                   `
                 )
@@ -5429,10 +5436,6 @@ const render = (language: Language) => {
   });
 
   playerNameTrigger?.addEventListener("click", () => {
-    if (!playerPredictionModal.selectedCountry) {
-      return;
-    }
-
     const isOpening = !playerPredictionModal.isPlayerMenuOpen;
     playerPredictionModal = {
       ...playerPredictionModal,
@@ -5470,9 +5473,11 @@ const render = (language: Language) => {
   playerNameButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const selectedPlayerNumber = Number(button.dataset.playerNumber);
+      const selectedCountry = button.dataset.playerCountryName ?? "";
 
       playerPredictionModal = {
         ...playerPredictionModal,
+        selectedCountry,
         selectedPlayerName: button.dataset.playerName ?? "",
         selectedPlayerNumber: Number.isFinite(selectedPlayerNumber) ? selectedPlayerNumber : null,
         isPlayerMenuOpen: false,
