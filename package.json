@@ -7,7 +7,7 @@
     "services/auth/client"
   ],
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1 --port 5173",
     "auth:dev": "npm run dev --workspace @worldcup/auth-client",
     "auth:build": "npm run build --workspace @worldcup/auth-client",
     "matches:dev": "C:\\Users\\juane\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe services\\matches\\server\\app.py",

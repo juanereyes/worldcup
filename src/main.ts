@@ -296,6 +296,7 @@ type PlayerPredictionModalState = {
 type Copy = {
   brandAria: string;
   navAria: string;
+  navMenuLabel: string;
   matchAria: string;
   languageLabel: string;
   nav: {
@@ -960,6 +961,7 @@ const copy: Record<Language, Copy> = {
   en: {
     brandAria: "World Cup Picks home",
     navAria: "Main navigation",
+    navMenuLabel: "Menu",
     matchAria: "World Cup match carousel",
     languageLabel: "Language",
     nav: {
@@ -1066,7 +1068,7 @@ const copy: Record<Language, Copy> = {
       scoreboardGeneral: "General",
       scoreboardGroupStage: "Group stage",
       scoreboardKnockoutStage: "Knockout stage",
-      scoreboardDailyPoints: (date) => `Points today (${date})`,
+      scoreboardDailyPoints: () => "Points today",
       scoreboardLoading: "Loading scoreboard...",
       scoreboardError: "The scoreboard is not available right now.",
       scoreboardEmpty: "No scored predictions yet.",
@@ -1331,6 +1333,7 @@ const copy: Record<Language, Copy> = {
   es: {
     brandAria: "Inicio de World Cup Picks",
     navAria: "Navegación principal",
+    navMenuLabel: "Menú",
     matchAria: "Carrusel de partidos del Mundial",
     languageLabel: "Idioma",
     nav: {
@@ -1437,7 +1440,7 @@ const copy: Record<Language, Copy> = {
       scoreboardGeneral: "General",
       scoreboardGroupStage: "Fase de grupos",
       scoreboardKnockoutStage: "Fase eliminatoria",
-      scoreboardDailyPoints: (date) => `Puntos de hoy (${date})`,
+      scoreboardDailyPoints: () => "Puntos de hoy",
       scoreboardLoading: "Cargando tabla de puntos...",
       scoreboardError: "La tabla de puntos no está disponible en este momento.",
       scoreboardEmpty: "Todavía no hay pronósticos con puntos.",
@@ -4610,6 +4613,22 @@ const renderStandings = (selectedCopy: Copy, language: Language) => {
   `;
 };
 
+const renderNavLinks = (selectedCopy: Copy) => `
+  <a href="/groups.html">${selectedCopy.nav.groups}</a>
+  <a href="/bracket.html">${selectedCopy.nav.bracket}</a>
+  <a href="/matches.html">${selectedCopy.nav.matches}</a>
+  ${currentUser ? `<a href="/predictions.html">${selectedCopy.nav.predictions}</a>` : ""}
+  ${currentUser ? `<a href="/my-lobbies.html">${selectedCopy.nav.myLobbies}</a>` : ""}
+`;
+
+const menuIcon = `
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M4 7h16" />
+    <path d="M4 12h16" />
+    <path d="M4 17h16" />
+  </svg>
+`;
+
 const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | undefined, language: Language) => `
   <header class="topbar" aria-label="${selectedCopy.navAria}">
     <a class="brand" href="/" aria-label="${selectedCopy.brandAria}">
@@ -4617,13 +4636,25 @@ const renderTopbar = (selectedCopy: Copy, selectedLanguage: LanguageOption | und
       <span>World Cup Picks</span>
     </a>
     <nav class="nav-links" aria-label="${selectedCopy.navAria}">
-      <a href="/groups.html">${selectedCopy.nav.groups}</a>
-      <a href="/bracket.html">${selectedCopy.nav.bracket}</a>
-      <a href="/matches.html">${selectedCopy.nav.matches}</a>
-      ${currentUser ? `<a href="/predictions.html">${selectedCopy.nav.predictions}</a>` : ""}
-      ${currentUser ? `<a href="/my-lobbies.html">${selectedCopy.nav.myLobbies}</a>` : ""}
+      ${renderNavLinks(selectedCopy)}
     </nav>
     <div class="topbar-actions">
+      <div class="mobile-nav-control">
+        <button
+          class="mobile-nav-trigger"
+          id="mobile-nav-trigger"
+          type="button"
+          aria-expanded="false"
+          aria-haspopup="menu"
+          aria-label="${selectedCopy.navMenuLabel}"
+        >
+          ${menuIcon}
+          <span>${selectedCopy.navMenuLabel}</span>
+        </button>
+        <nav class="mobile-nav-menu" id="mobile-nav-menu" aria-label="${selectedCopy.navAria}" hidden>
+          ${renderNavLinks(selectedCopy)}
+        </nav>
+      </div>
       <div class="language-control">
         <button
           class="language-trigger"
@@ -4825,6 +4856,9 @@ const render = (language: Language) => {
   const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
   const languageMenu = document.querySelector<HTMLDivElement>("#language-menu");
   const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
+  const mobileNavControl = document.querySelector<HTMLDivElement>(".mobile-nav-control");
+  const mobileNavTrigger = document.querySelector<HTMLButtonElement>("#mobile-nav-trigger");
+  const mobileNavMenu = document.querySelector<HTMLElement>("#mobile-nav-menu");
   const accountControl = document.querySelector<HTMLDivElement>(".account-control");
   const accountTrigger = document.querySelector<HTMLButtonElement>("#account-trigger");
   const accountMenu = document.querySelector<HTMLDivElement>("#account-menu");
@@ -4938,6 +4972,11 @@ const render = (language: Language) => {
     languageTrigger?.setAttribute("aria-expanded", "false");
   };
 
+  const closeMobileNavMenu = () => {
+    mobileNavMenu?.setAttribute("hidden", "");
+    mobileNavTrigger?.setAttribute("aria-expanded", "false");
+  };
+
   languageTrigger?.addEventListener("click", () => {
     const isOpen = languageMenu?.hasAttribute("hidden") === false;
 
@@ -4946,6 +4985,7 @@ const render = (language: Language) => {
       return;
     }
 
+    closeMobileNavMenu();
     languageMenu?.removeAttribute("hidden");
     languageTrigger.setAttribute("aria-expanded", "true");
   });
@@ -4966,6 +5006,26 @@ const render = (language: Language) => {
     });
   });
 
+  mobileNavTrigger?.addEventListener("click", () => {
+    const isOpen = mobileNavMenu?.hasAttribute("hidden") === false;
+
+    if (isOpen) {
+      closeMobileNavMenu();
+      return;
+    }
+
+    closeLanguageMenu();
+    mobileNavMenu?.removeAttribute("hidden");
+    mobileNavTrigger.setAttribute("aria-expanded", "true");
+  });
+
+  mobileNavControl?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeMobileNavMenu();
+      mobileNavTrigger?.focus();
+    }
+  });
+
   const closeAccountMenu = () => {
     accountMenu?.setAttribute("hidden", "");
     accountTrigger?.setAttribute("aria-expanded", "false");
@@ -4979,6 +5039,7 @@ const render = (language: Language) => {
       return;
     }
 
+    closeMobileNavMenu();
     accountMenu?.removeAttribute("hidden");
     accountTrigger.setAttribute("aria-expanded", "true");
   });
@@ -4987,6 +5048,26 @@ const render = (language: Language) => {
     if (event.key === "Escape") {
       closeAccountMenu();
       accountTrigger?.focus();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Node ? event.target : null;
+
+    if (!target) {
+      return;
+    }
+
+    if (!languageControl?.contains(target)) {
+      closeLanguageMenu();
+    }
+
+    if (!mobileNavControl?.contains(target)) {
+      closeMobileNavMenu();
+    }
+
+    if (!accountControl?.contains(target)) {
+      closeAccountMenu();
     }
   });
 

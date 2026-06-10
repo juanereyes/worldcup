@@ -40,6 +40,8 @@ button {
 button,
 .language-trigger,
 .language-option,
+.mobile-nav-trigger,
+.mobile-nav-menu a,
 .account-trigger,
 .signout-option,
 .account-danger-option {
@@ -56,6 +58,8 @@ img {
 
 .language-trigger,
 .language-option,
+.mobile-nav-trigger,
+.mobile-nav-menu a,
 .account-trigger,
 .signout-option,
 .account-danger-option {
@@ -135,6 +139,8 @@ img {
 
 .language-trigger,
 .language-option,
+.mobile-nav-trigger,
+.mobile-nav-menu a,
 .account-trigger,
 .signout-option,
 .account-danger-option {
@@ -156,6 +162,10 @@ img {
   min-width: 82px;
 }
 
+.mobile-nav-trigger {
+  min-width: 96px;
+}
+
 .account-trigger {
   max-width: 180px;
   overflow: hidden;
@@ -167,6 +177,10 @@ img {
 .language-trigger:focus-visible,
 .language-option:hover,
 .language-option:focus-visible,
+.mobile-nav-trigger:hover,
+.mobile-nav-trigger:focus-visible,
+.mobile-nav-menu a:hover,
+.mobile-nav-menu a:focus-visible,
 .account-trigger:hover,
 .account-trigger:focus-visible,
 .signout-option:hover,
@@ -189,7 +203,23 @@ img {
   width: 24px;
 }
 
+.mobile-nav-control {
+  display: none;
+  position: relative;
+}
+
+.mobile-nav-trigger svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 18px;
+}
+
 .language-menu,
+.mobile-nav-menu,
 .account-menu {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -206,16 +236,29 @@ img {
 }
 
 .language-menu[hidden],
+.mobile-nav-menu[hidden],
 .account-menu[hidden] {
   display: none;
 }
 
 .language-option,
+.mobile-nav-menu a,
 .signout-option,
 .account-danger-option {
   box-shadow: none;
   justify-content: flex-start;
   width: 100%;
+}
+
+.mobile-nav-menu {
+  left: 0;
+  min-width: 190px;
+  right: auto;
+}
+
+.mobile-nav-menu a {
+  color: var(--ink);
+  text-decoration: none;
 }
 
 .language-option[aria-current="true"] {
@@ -2249,6 +2292,10 @@ body[data-page="my-lobbies"] .my-lobbies-section {
 
   .nav-links {
     display: none;
+  }
+
+  .mobile-nav-control {
+    display: block;
   }
 
   .hero {
