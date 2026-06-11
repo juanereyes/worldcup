@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
@@ -18,9 +18,12 @@ load_dotenv()
 
 API_BASE_URL = "https://api.football-data.org/v4"
 COMPETITION_CODE = "WC"
+COMPETITION_ID = "2000"
 SEASON = "2026"
 BOGOTA_TZ = ZoneInfo("America/Bogota")
 CACHE_TTL_SECONDS = 60
+RECENT_MATCH_LOOKBACK_DAYS = 1
+TEAM_MATCH_FALLBACK_LIMIT = 6
 CACHE_PATH = Path(__file__).resolve().parents[2] / "cache" / "world-cup-2026-matches.json"
 _matches_cache: list[dict[str, Any]] | None = None
 _matches_cache_loaded_at = 0.0
@@ -87,20 +90,27 @@ def get_api_token() -> str:
     return token
 
 
-def fetch_world_cup_matches() -> list[dict[str, Any]]:
+def fetch_football_data_json(path: str, query: dict[str, str]) -> dict[str, Any]:
     token = get_api_token()
-    query = urlencode({"season": SEASON})
-    url = f"{API_BASE_URL}/competitions/{COMPETITION_CODE}/matches?{query}"
+    encoded_query = urlencode(query)
+    url = f"{API_BASE_URL}{path}?{encoded_query}" if encoded_query else f"{API_BASE_URL}{path}"
     request = Request(url, headers={"X-Auth-Token": token, "Accept": "application/json"})
 
     try:
         with urlopen(request, timeout=12) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            return json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise FootballDataError(f"football-data.org returned {error.code}: {detail}") from error
     except (TimeoutError, URLError, json.JSONDecodeError) as error:
-        raise FootballDataError("Could not fetch World Cup matches.") from error
+        raise FootballDataError("Could not fetch football-data.org data.") from error
+
+
+def fetch_world_cup_matches() -> list[dict[str, Any]]:
+    payload = fetch_football_data_json(
+        f"/competitions/{COMPETITION_CODE}/matches",
+        {"season": SEASON},
+    )
 
     matches = payload.get("matches")
 
@@ -110,7 +120,198 @@ def fetch_world_cup_matches() -> list[dict[str, Any]]:
     return matches
 
 
-def read_cached_world_cup_matches() -> tuple[list[dict[str, Any]], float] | None:
+def fetch_team_matches(team_id: int, date_from: date, date_to: date) -> list[dict[str, Any]]:
+    payload = fetch_football_data_json(
+        f"/teams/{team_id}/matches",
+        {
+            "dateFrom": date_from.isoformat(),
+            "dateTo": date_to.isoformat(),
+            "season": SEASON,
+            "competitions": COMPETITION_ID,
+            "limit": "20",
+        },
+    )
+    matches = payload.get("matches")
+
+    if not isinstance(matches, list):
+        raise FootballDataError("football-data.org team response did not include matches.")
+
+    return matches
+
+
+def parse_utc_datetime(match: dict[str, Any]) -> datetime | None:
+    utc_date = match.get("utcDate")
+
+    if not isinstance(utc_date, str):
+        return None
+
+    try:
+        return datetime.fromisoformat(utc_date.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def full_time_score(match: dict[str, Any]) -> dict[str, Any]:
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    full_time = score.get("fullTime") if isinstance(score.get("fullTime"), dict) else {}
+
+    return full_time
+
+
+def has_full_time_score(match: dict[str, Any]) -> bool:
+    full_time = full_time_score(match)
+
+    return isinstance(full_time.get("home"), int) and isinstance(full_time.get("away"), int)
+
+
+def team_id(team: Any) -> int | None:
+    if not isinstance(team, dict):
+        return None
+
+    value = team.get("id")
+
+    return value if isinstance(value, int) else None
+
+
+def is_recent_started_match_with_missing_score(match: dict[str, Any], now: datetime) -> bool:
+    if has_full_time_score(match):
+        return False
+
+    kickoff = parse_utc_datetime(match)
+
+    if kickoff is None or kickoff > now:
+        return False
+
+    local_day = kickoff.astimezone(BOGOTA_TZ).date()
+    earliest_day = now.astimezone(BOGOTA_TZ).date() - timedelta(days=RECENT_MATCH_LOOKBACK_DAYS)
+
+    return local_day >= earliest_day
+
+
+def fallback_team_id(match: dict[str, Any]) -> int | None:
+    return team_id(match.get("homeTeam")) or team_id(match.get("awayTeam"))
+
+
+def merge_score_from_team_match(match: dict[str, Any], team_match: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(match)
+    updated_score = dict(updated.get("score")) if isinstance(updated.get("score"), dict) else {}
+    team_score = team_match.get("score") if isinstance(team_match.get("score"), dict) else {}
+
+    updated_score["fullTime"] = dict(full_time_score(team_match))
+
+    if "winner" in team_score:
+        updated_score["winner"] = team_score.get("winner")
+
+    updated["score"] = updated_score
+    updated["status"] = team_match.get("status", updated.get("status"))
+    updated["lastUpdated"] = team_match.get("lastUpdated", updated.get("lastUpdated"))
+
+    return updated
+
+
+def fallback_resolution_match(resolution: Any) -> dict[str, Any] | None:
+    if not isinstance(resolution, dict):
+        return None
+
+    match = resolution.get("match")
+
+    return match if isinstance(match, dict) and has_full_time_score(match) else None
+
+
+def add_recent_team_match_scores(
+    matches: list[dict[str, Any]],
+    fallback_resolutions: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    known_match_ids = {
+        str(match["id"])
+        for match in matches
+        if isinstance(match.get("id"), int)
+    }
+    next_fallback_resolutions = {
+        match_id: resolution
+        for match_id, resolution in (fallback_resolutions or {}).items()
+        if match_id in known_match_ids and fallback_resolution_match(resolution) is not None
+    }
+    candidates = [
+        match
+        for match in matches
+        if is_recent_started_match_with_missing_score(match, now)
+    ]
+
+    if not candidates:
+        return matches, next_fallback_resolutions
+
+    by_id = {
+        int(match["id"]): match
+        for match in matches
+        if isinstance(match.get("id"), int)
+    }
+    team_matches_cache: dict[int, list[dict[str, Any]]] = {}
+    team_calls = 0
+
+    for candidate in candidates:
+        match_id = candidate.get("id")
+
+        if not isinstance(match_id, int):
+            continue
+
+        stored_match = fallback_resolution_match(next_fallback_resolutions.get(str(match_id)))
+
+        if stored_match is not None:
+            by_id[match_id] = merge_score_from_team_match(candidate, stored_match)
+            continue
+
+        kickoff = parse_utc_datetime(candidate)
+
+        if kickoff is None:
+            continue
+
+        local_date = kickoff.astimezone(BOGOTA_TZ).date()
+        utc_date = kickoff.date()
+        date_from = min(local_date, utc_date)
+        date_to = max(local_date, utc_date)
+        candidate_team_id = fallback_team_id(candidate)
+
+        if candidate_team_id is None:
+            continue
+
+        if candidate_team_id not in team_matches_cache:
+            if team_calls >= TEAM_MATCH_FALLBACK_LIMIT:
+                return [by_id.get(int(match.get("id", 0)), match) for match in matches], next_fallback_resolutions
+
+            try:
+                team_matches_cache[candidate_team_id] = fetch_team_matches(
+                    candidate_team_id,
+                    date_from,
+                    date_to,
+                )
+            except FootballDataError:
+                team_matches_cache[candidate_team_id] = []
+            team_calls += 1
+
+        team_match = next(
+            (
+                team_match
+                for team_match in team_matches_cache[candidate_team_id]
+                if team_match.get("id") == match_id and has_full_time_score(team_match)
+            ),
+            None,
+        )
+
+        if team_match is not None:
+            updated_match = merge_score_from_team_match(candidate, team_match)
+            by_id[match_id] = updated_match
+            next_fallback_resolutions[str(match_id)] = {
+                "resolvedAt": time.time(),
+                "teamId": candidate_team_id,
+                "match": updated_match,
+            }
+
+    return [by_id.get(int(match.get("id", 0)), match) for match in matches], next_fallback_resolutions
+
+
+def read_cached_world_cup_matches() -> tuple[list[dict[str, Any]], float, dict[str, Any]] | None:
     if not CACHE_PATH.exists():
         return None
 
@@ -121,17 +322,28 @@ def read_cached_world_cup_matches() -> tuple[list[dict[str, Any]], float] | None
 
     matches = payload.get("matches")
     fetched_at = payload.get("fetchedAt")
+    fallback_resolutions = payload.get("resolvedByTeamFallback")
 
     if not isinstance(matches, list) or not isinstance(fetched_at, (int, float)):
         return None
 
-    return matches, float(fetched_at)
+    return matches, float(fetched_at), fallback_resolutions if isinstance(fallback_resolutions, dict) else {}
 
 
-def write_cached_world_cup_matches(matches: list[dict[str, Any]], fetched_at: float) -> None:
+def write_cached_world_cup_matches(
+    matches: list[dict[str, Any]],
+    fetched_at: float,
+    fallback_resolutions: dict[str, Any] | None = None,
+) -> None:
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(
-        json.dumps({"fetchedAt": fetched_at, "matches": matches}),
+        json.dumps(
+            {
+                "fetchedAt": fetched_at,
+                "matches": matches,
+                "resolvedByTeamFallback": fallback_resolutions or {},
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -139,9 +351,14 @@ def write_cached_world_cup_matches(matches: list[dict[str, Any]], fetched_at: fl
 def refresh_world_cup_matches_cache() -> list[dict[str, Any]]:
     global _matches_cache, _matches_cache_loaded_at
 
-    matches = fetch_world_cup_matches()
+    cached = read_cached_world_cup_matches()
+    fallback_resolutions = cached[2] if cached is not None else {}
+    matches, fallback_resolutions = add_recent_team_match_scores(
+        fetch_world_cup_matches(),
+        fallback_resolutions,
+    )
     fetched_at = time.time()
-    write_cached_world_cup_matches(matches, fetched_at)
+    write_cached_world_cup_matches(matches, fetched_at, fallback_resolutions)
 
     with _matches_cache_lock:
         _matches_cache = matches
@@ -177,7 +394,7 @@ def get_world_cup_matches() -> list[dict[str, Any]]:
     cached = read_cached_world_cup_matches()
 
     if cached is not None:
-        matches, fetched_at = cached
+        matches, fetched_at, _fallback_resolutions = cached
 
         with _matches_cache_lock:
             _matches_cache = matches
