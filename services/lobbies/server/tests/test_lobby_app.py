@@ -206,6 +206,72 @@ class LobbyScoreboardTest(unittest.TestCase):
         self.assertEqual(rows["juan"]["groupStagePoints"], 2)
         self.assertEqual(rows["juan"]["knockoutStagePoints"], 0)
 
+    def test_scoreboard_uses_default_prediction_when_lobby_prediction_is_incomplete(self) -> None:
+        lobby = LobbyRecord(
+            code="ABCD",
+            name="Friends",
+            requires_password=False,
+            member_count=1,
+            point_system="simple",
+            custom_settings=None,
+            members=[LobbyMemberRecord(user_id=1, username="ana", role="admin")],
+        )
+        predictions = [MemberMatchPredictionRecord(user_id=1, username="ana", match_id=10, home_score=2, away_score=None)]
+        default_predictions = [
+            MemberMatchPredictionRecord(user_id=1, username="ana", match_id=10, home_score=2, away_score=1)
+        ]
+        matches = {
+            10: FinishedMatch(
+                id=10,
+                stage="Group Stage",
+                group="Group A",
+                date="2026-06-14",
+                home_team="Mexico",
+                away_team="Canada",
+                home_score=2,
+                away_score=1,
+            )
+        }
+
+        payload = build_scoreboard_payload(lobby, predictions, matches, default_predictions=default_predictions)
+        row = payload["scoreboard"]["general"][0]
+
+        self.assertEqual(row["totalPoints"], 4)
+        self.assertEqual(row["groupStagePoints"], 4)
+
+    def test_scoreboard_keeps_complete_lobby_prediction_over_default_prediction(self) -> None:
+        lobby = LobbyRecord(
+            code="ABCD",
+            name="Friends",
+            requires_password=False,
+            member_count=1,
+            point_system="simple",
+            custom_settings=None,
+            members=[LobbyMemberRecord(user_id=1, username="ana", role="admin")],
+        )
+        predictions = [MemberMatchPredictionRecord(user_id=1, username="ana", match_id=10, home_score=1, away_score=0)]
+        default_predictions = [
+            MemberMatchPredictionRecord(user_id=1, username="ana", match_id=10, home_score=2, away_score=1)
+        ]
+        matches = {
+            10: FinishedMatch(
+                id=10,
+                stage="Group Stage",
+                group="Group A",
+                date="2026-06-14",
+                home_team="Mexico",
+                away_team="Canada",
+                home_score=2,
+                away_score=1,
+            )
+        }
+
+        payload = build_scoreboard_payload(lobby, predictions, matches, default_predictions=default_predictions)
+        row = payload["scoreboard"]["general"][0]
+
+        self.assertEqual(row["totalPoints"], 2)
+        self.assertEqual(row["groupStagePoints"], 2)
+
     def test_choose_team_custom_feature_doubles_matching_team_points(self) -> None:
         lobby = LobbyRecord(
             code="ABCD",

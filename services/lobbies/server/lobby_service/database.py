@@ -691,6 +691,47 @@ def list_lobby_match_predictions(
     ]
 
 
+def list_lobby_member_default_match_predictions(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    requesting_user_id: int,
+) -> list[MemberMatchPredictionRecord]:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_member(connection, normalized_code, requesting_user_id):
+        raise LobbyPermissionError("Only lobby members can view the scoreboard.")
+
+    rows = connection.execute(
+        """
+        SELECT
+          default_match_predictions.user_id,
+          lobby_members.username,
+          default_match_predictions.match_id,
+          default_match_predictions.home_score,
+          default_match_predictions.away_score
+        FROM default_match_predictions
+        JOIN lobby_members
+          ON lobby_members.user_id = default_match_predictions.user_id
+        WHERE lobby_members.lobby_code = ?
+        ORDER BY lobby_members.username COLLATE NOCASE ASC, default_match_predictions.match_id ASC
+        """,
+        (normalized_code,),
+    ).fetchall()
+
+    return [
+        MemberMatchPredictionRecord(
+            user_id=int(row["user_id"]),
+            username=str(row["username"]),
+            match_id=int(row["match_id"]),
+            home_score=int(row["home_score"]) if row["home_score"] is not None else None,
+            away_score=int(row["away_score"]) if row["away_score"] is not None else None,
+        )
+        for row in rows
+    ]
+
+
 def list_lobby_special_predictions(
     connection: sqlite3.Connection,
     *,

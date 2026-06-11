@@ -32,6 +32,7 @@ from lobby_service.database import (
     get_lobby_for_member,
     initialize_database,
     list_default_match_predictions,
+    list_lobby_member_default_match_predictions,
     list_lobby_match_predictions,
     list_lobby_special_predictions,
     list_match_predictions,
@@ -363,11 +364,39 @@ def ensure_bracket_heavy_prediction_open(schedule: dict[int, MatchSchedule]) -> 
     raise PredictionWindowError("Bracket predictions are already closed.")
 
 
+def is_complete_prediction(prediction: Any) -> bool:
+    return prediction.home_score is not None and prediction.away_score is not None
+
+
+def apply_default_predictions_for_finished_matches(
+    predictions: list[Any],
+    default_predictions: list[Any],
+    matches: dict[int, FinishedMatch],
+) -> list[Any]:
+    merged = {
+        (prediction.user_id, prediction.match_id): prediction
+        for prediction in predictions
+    }
+
+    for default_prediction in default_predictions:
+        if default_prediction.match_id not in matches or not is_complete_prediction(default_prediction):
+            continue
+
+        key = (default_prediction.user_id, default_prediction.match_id)
+        lobby_prediction = merged.get(key)
+
+        if lobby_prediction is None or not is_complete_prediction(lobby_prediction):
+            merged[key] = default_prediction
+
+    return list(merged.values())
+
+
 def build_scoreboard_payload(
     lobby: LobbyRecord,
     predictions: list[Any],
     matches: dict[int, FinishedMatch],
     special_predictions: list[Any] | None = None,
+    default_predictions: list[Any] | None = None,
 ) -> dict[str, Any]:
     today = datetime.now(BOGOTA_TZ).date().isoformat()
     rows = {
@@ -382,8 +411,13 @@ def build_scoreboard_payload(
         for member in lobby.members
     }
     special_by_user = special_predictions_by_user(special_predictions or [])
+    scoring_predictions = apply_default_predictions_for_finished_matches(
+        predictions,
+        default_predictions or [],
+        matches,
+    )
 
-    for prediction in predictions:
+    for prediction in scoring_predictions:
         match = matches.get(prediction.match_id)
 
         if (
@@ -1219,6 +1253,11 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     code=code,
                     requesting_user_id=int(authenticated_user["id"]),
                 )
+                default_predictions = list_lobby_member_default_match_predictions(
+                    connection,
+                    code=code,
+                    requesting_user_id=int(authenticated_user["id"]),
+                )
             except AuthenticationError as error:
                 self.send_json(401, {"code": "not_authenticated", "error": str(error)})
                 return
@@ -1235,7 +1274,16 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             self.send_json(502, {"error": str(error)})
             return
 
-        self.send_json(200, build_scoreboard_payload(lobby, predictions, matches, special_predictions))
+        self.send_json(
+            200,
+            build_scoreboard_payload(
+                lobby,
+                predictions,
+                matches,
+                special_predictions,
+                default_predictions,
+            ),
+        )
 
     def list_default_predictions(self) -> None:
         with connect() as connection:
