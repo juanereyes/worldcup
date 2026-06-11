@@ -142,6 +142,17 @@ type MatchPrediction = {
   awayScore: number | null;
 };
 
+type SpecialPrediction = {
+  userId: number;
+  username: string;
+  type: GlobalPlacementPredictionId | PlayerPredictionId | "chooseTeam" | "trackTeam" | "bracketHeavy";
+  teamName: string | null;
+  playerCountry: string | null;
+  playerName: string | null;
+  playerNumber: number | null;
+  selections: Record<string, string> | null;
+};
+
 type ScoreboardRow = {
   userId: number;
   username: string;
@@ -617,6 +628,7 @@ let currentLobby: Lobby | null = null;
 let userLobbies: Lobby[] = [];
 let lobbyScoreboard: LobbyScoreboard | null = null;
 let matchPredictions: Record<number, MatchPrediction> = {};
+let specialPredictions: Record<string, SpecialPrediction> = {};
 let predictionSaveStates: Record<number, PredictionSaveState> = {};
 let selectedPredictionLobbyCode = defaultPredictionLobbyCode;
 let selectedPredictionPhase = "";
@@ -1960,6 +1972,36 @@ const saveStoredBracketHeavySelections = (lobby: Lobby, selections: Record<strin
   window.localStorage.setItem(getBracketHeavySelectionsStorageKey(lobby), JSON.stringify(selections));
 };
 
+const getServerSpecialPrediction = (predictionType: SpecialPrediction["type"]) => specialPredictions[predictionType] ?? null;
+
+const getServerGlobalPlacementPrediction = (predictionId: GlobalPlacementPredictionId) =>
+  getServerSpecialPrediction(predictionId)?.teamName ?? "";
+
+const getServerChooseTeamPrediction = () => getServerSpecialPrediction("chooseTeam")?.teamName ?? "";
+
+const getServerTrackTeamPrediction = () => getServerSpecialPrediction("trackTeam")?.selections?.phase ?? "";
+
+const getServerPlayerPrediction = (predictionId: PlayerPredictionId): PlayerPredictionSelection | undefined => {
+  const prediction = getServerSpecialPrediction(predictionId);
+
+  if (
+    !prediction ||
+    !prediction.playerCountry ||
+    !prediction.playerName ||
+    typeof prediction.playerNumber !== "number"
+  ) {
+    return undefined;
+  }
+
+  return {
+    country: prediction.playerCountry,
+    name: prediction.playerName,
+    number: prediction.playerNumber
+  };
+};
+
+const getServerBracketHeavySelections = () => getServerSpecialPrediction("bracketHeavy")?.selections ?? {};
+
 const saveSpecialPrediction = async (
   lobby: Lobby,
   predictionType: GlobalPlacementPredictionId | PlayerPredictionId | "chooseTeam" | "trackTeam" | "bracketHeavy",
@@ -1979,6 +2021,16 @@ const saveSpecialPrediction = async (
 
   if (!response.ok) {
     throw new Error("Could not save special prediction.");
+  }
+
+  const result = (await response.json()) as { prediction?: SpecialPrediction };
+
+  if (result.prediction) {
+    specialPredictions = {
+      ...specialPredictions,
+      [result.prediction.type]: result.prediction
+    };
+    render(getStoredLanguage());
   }
 };
 
@@ -2589,9 +2641,9 @@ const renderGlobalPredictionOptionContent = (
   language: Language
 ) => {
   const selectedTeam = option.isPlacement
-    ? getStoredGlobalPlacementPredictions(lobby)[option.id as GlobalPlacementPredictionId]
+    ? getServerGlobalPlacementPrediction(option.id as GlobalPlacementPredictionId)
     : null;
-  const selectedPlayer = option.isPlayer ? getStoredPlayerPredictions(lobby)[option.id as PlayerPredictionId] : null;
+  const selectedPlayer = option.isPlayer ? getServerPlayerPrediction(option.id as PlayerPredictionId) : null;
 
   if (!selectedTeam && !selectedPlayer) {
     return `<span>${option.label}</span>`;
@@ -2622,9 +2674,9 @@ const renderCustomFeatureButtons = (selectedCopy: Copy, language: Language, lobb
         feature === "trackTeam"
           ? lobby.customSettings?.trackedTeam
           : feature === "chooseTeam"
-            ? getStoredChooseTeam(lobby)
+            ? getServerChooseTeamPrediction()
             : null;
-      const selectedPlayer = feature === "favoritePlayer" ? getStoredPlayerPredictions(lobby).favoritePlayer : null;
+      const selectedPlayer = feature === "favoritePlayer" ? getServerPlayerPrediction("favoritePlayer") : null;
 
       return `
         <button
@@ -3326,7 +3378,7 @@ const renderBracketHeavyModal = (selectedCopy: Copy, language: Language) => {
   }
 
   const hasKnockoutMatches = getKnockoutMatches().length > 0;
-  const selections = getStoredBracketHeavySelections(currentLobby);
+  const selections = getServerBracketHeavySelections();
   const isWindowOpen = getBracketHeavyWindowState() === "open";
 
   return `
@@ -5293,12 +5345,10 @@ const render = (language: Language) => {
         return;
       }
 
-      const storedPredictions = getStoredGlobalPlacementPredictions(currentLobby);
-
       globalPlacementPredictionModal = {
         isOpen: true,
         predictionId,
-        selectedTeam: storedPredictions[predictionId] ?? "",
+        selectedTeam: getServerGlobalPlacementPrediction(predictionId),
         isMenuOpen: false,
         searchQuery: ""
       };
@@ -5372,11 +5422,6 @@ const render = (language: Language) => {
     const predictionId = globalPlacementPredictionModal.predictionId;
     const selectedTeam = globalPlacementPredictionModal.selectedTeam;
 
-    saveStoredGlobalPlacementPrediction(
-      lobby,
-      predictionId,
-      selectedTeam
-    );
     closeGlobalPlacementPredictionModal();
     void saveSpecialPrediction(lobby, predictionId, { teamName: selectedTeam });
   });
@@ -5616,7 +5661,7 @@ const render = (language: Language) => {
       trackTeamPredictionModal = {
         isOpen: true,
         lobby,
-        selectedPhase: getStoredTrackTeamPrediction(lobby)
+        selectedPhase: getServerTrackTeamPrediction()
       };
       render(getStoredLanguage());
     });
@@ -5652,7 +5697,6 @@ const render = (language: Language) => {
     const lobby = trackTeamPredictionModal.lobby;
     const selectedPhase = trackTeamPredictionModal.selectedPhase;
 
-    saveStoredTrackTeamPrediction(lobby, selectedPhase);
     closeTrackTeamPredictionModal();
     void saveSpecialPrediction(lobby, "trackTeam", { selections: { phase: selectedPhase } });
   });
@@ -5679,7 +5723,7 @@ const render = (language: Language) => {
       chooseTeamModal = {
         isOpen: true,
         lobby,
-        selectedTeam: getStoredChooseTeam(lobby),
+        selectedTeam: getServerChooseTeamPrediction(),
         isMenuOpen: false,
         searchQuery: ""
       };
@@ -5752,7 +5796,6 @@ const render = (language: Language) => {
     const lobby = chooseTeamModal.lobby;
     const selectedTeam = chooseTeamModal.selectedTeam;
 
-    saveStoredChooseTeam(lobby, selectedTeam);
     closeChooseTeamModal();
     void saveSpecialPrediction(lobby, "chooseTeam", { teamName: selectedTeam });
   });
@@ -5800,7 +5843,7 @@ const render = (language: Language) => {
         return;
       }
 
-      const storedPrediction = getStoredPlayerPredictions(lobby)[predictionId];
+      const storedPrediction = getServerPlayerPrediction(predictionId);
 
       playerPredictionModal = {
         isOpen: true,
@@ -5954,7 +5997,6 @@ const render = (language: Language) => {
       number: playerPredictionModal.selectedPlayerNumber
     };
 
-    saveStoredPlayerPrediction(lobby, predictionId, selection);
     closePlayerPredictionModal();
     void saveSpecialPrediction(lobby, predictionId, {
       playerCountry: selection.country,
@@ -6020,7 +6062,7 @@ const render = (language: Language) => {
         return;
       }
 
-      const selections = getStoredBracketHeavySelections(currentLobby);
+      const selections = getServerBracketHeavySelections();
       const nextSelections = {
         ...selections
       };
@@ -6032,7 +6074,6 @@ const render = (language: Language) => {
       }
 
       const validSelections = getValidBracketHeavySelections(nextSelections);
-      saveStoredBracketHeavySelections(currentLobby, validSelections);
       void saveSpecialPrediction(currentLobby, "bracketHeavy", { selections: validSelections });
       render(getStoredLanguage());
     });
@@ -7092,6 +7133,7 @@ const loadLobby = async () => {
   lobbyError = null;
   currentLobby = null;
   lobbyScoreboard = null;
+  specialPredictions = {};
   lobbyScoreboardError = null;
   areLobbyRulesVisible = false;
   render(getStoredLanguage());
@@ -7114,9 +7156,11 @@ const loadLobby = async () => {
     currentLobby = result.lobby ?? null;
     if (currentLobby) {
       void loadLobbyScoreboard(currentLobby.code);
+      void loadLobbySpecialPredictions(currentLobby.code);
     }
   } catch {
     currentLobby = null;
+    specialPredictions = {};
     lobbyError = "unavailable";
   } finally {
     isLobbyLoading = false;
@@ -7146,6 +7190,29 @@ const loadLobbyScoreboard = async (lobbyCode: string) => {
     lobbyScoreboardError = "unavailable";
   } finally {
     isLobbyScoreboardLoading = false;
+    render(getStoredLanguage());
+  }
+};
+
+const loadLobbySpecialPredictions = async (lobbyCode: string) => {
+  specialPredictions = {};
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobbyCode)}/special-predictions`, {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not load special predictions.");
+    }
+
+    const result = (await response.json()) as { predictions?: SpecialPrediction[] };
+    specialPredictions = Object.fromEntries(
+      (Array.isArray(result.predictions) ? result.predictions : []).map((prediction) => [prediction.type, prediction])
+    );
+  } catch {
+    specialPredictions = {};
+  } finally {
     render(getStoredLanguage());
   }
 };

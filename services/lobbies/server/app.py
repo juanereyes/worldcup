@@ -1000,6 +1000,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             self.list_lobby_predictions(path_parts[1])
             return
 
+        if len(path_parts) == 3 and path_parts[0] == "lobbies" and path_parts[2] == "special-predictions":
+            self.list_lobby_special_predictions(path_parts[1])
+            return
+
         if len(path_parts) == 3 and path_parts[0] == "lobbies" and path_parts[2] == "scoreboard":
             self.get_lobby_scoreboard(path_parts[1])
             return
@@ -1231,6 +1235,34 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
 
         self.send_json(200, {"predictions": [self.match_prediction_payload(prediction) for prediction in predictions]})
+
+    def list_lobby_special_predictions(self, code: str) -> None:
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                authenticated_user = self.get_authenticated_user()
+                user_id = int(authenticated_user["id"])
+                predictions = [
+                    prediction
+                    for prediction in list_lobby_special_predictions(
+                        connection,
+                        code=code,
+                        requesting_user_id=user_id,
+                    )
+                    if prediction.user_id == user_id
+                ]
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+
+        self.send_json(200, {"predictions": [self.special_prediction_payload(prediction) for prediction in predictions]})
 
     def get_lobby_scoreboard(self, code: str) -> None:
         with connect() as connection:
