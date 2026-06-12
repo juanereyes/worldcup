@@ -1,5 +1,8 @@
 import "./styles.css";
 import { playerGuide } from "./playerGuide";
+import { inject } from '@vercel/analytics';
+
+inject();
 
 type Language = "en" | "es";
 
