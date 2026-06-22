@@ -16,12 +16,14 @@ from auth_service.database import (
     authenticate_user,
     connect,
     create_email_verification,
+    create_password_reset,
     create_session,
     create_user,
     delete_session,
     delete_user,
     get_user_for_session,
     initialize_database,
+    reset_password_with_token,
     verify_email_token,
 )
 from auth_service.password_policy import is_valid_password, password_errors
@@ -202,6 +204,50 @@ class AuthServiceTest(unittest.TestCase):
         self.assertIsNotNone(verified_user)
         self.assertTrue(verified_user.email_verified)  # type: ignore[union-attr]
         self.assertIsNone(reused_user)
+
+    def test_password_reset_token_updates_password_and_consumes_token(self) -> None:
+        user = create_user(
+            self.connection,
+            username="juan",
+            email="juan@example.com",
+            display_name="Juan",
+            password="Worldcup1",
+        )
+        self.verify_user_email(user)
+        session = create_session(self.connection, user)
+        reset = create_password_reset(self.connection, user)
+
+        reset_user = reset_password_with_token(self.connection, reset.token, "Newpass1")
+        reused_user = reset_password_with_token(self.connection, reset.token, "Otherpass1")
+
+        self.assertIsNotNone(reset_user)
+        self.assertIsNone(reused_user)
+        self.assertIsNone(get_user_for_session(self.connection, session.token))
+        with self.assertRaises(InvalidCredentialsError):
+            authenticate_user(
+                self.connection,
+                identifier="juan",
+                password="Worldcup1",
+            )
+        authenticated_user = authenticate_user(
+            self.connection,
+            identifier="juan",
+            password="Newpass1",
+        )
+        self.assertEqual(authenticated_user.email, "juan@example.com")
+
+    def test_password_reset_rejects_invalid_password(self) -> None:
+        user = create_user(
+            self.connection,
+            username="juan",
+            email="juan@example.com",
+            display_name="Juan",
+            password="Worldcup1",
+        )
+        reset = create_password_reset(self.connection, user)
+
+        with self.assertRaises(InvalidPasswordError):
+            reset_password_with_token(self.connection, reset.token, "password")
 
     def test_delete_session_removes_session_lookup(self) -> None:
         user = create_user(

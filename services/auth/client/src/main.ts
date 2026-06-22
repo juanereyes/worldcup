@@ -3,6 +3,7 @@ import "./styles.css";
 type AuthMode = "signin" | "create";
 type Language = "en" | "es";
 type VerificationStatus = "idle" | "loading" | "success" | "error";
+type ResetFeedback = { state: "success" | "error" | "info"; text: string } | null;
 
 type PasswordRequirement = {
   key: string;
@@ -54,6 +55,29 @@ type AuthCopy = {
   passwordRequirements: PasswordRequirement[];
 };
 
+type PasswordResetCopy = {
+  requestTitle: string;
+  requestSummary: string;
+  identifierLabel: string;
+  requestSubmit: string;
+  requestSent: string;
+  requestError: string;
+  resetTitle: string;
+  resetSummary: string;
+  newPasswordLabel: string;
+  confirmPasswordLabel: string;
+  resetSubmit: string;
+  resetSuccess: string;
+  resetError: string;
+  forgotPassword: string;
+  passwordGuidance: string;
+  passwordIncomplete: string;
+  passwordMismatch: string;
+  devResetLink: string;
+  backToSignIn: string;
+  serviceUnavailable: string;
+};
+
 const ensureTrailingSlash = (url: string) => (url.endsWith("/") ? url : `${url}/`);
 
 const authApiUrl = import.meta.env.VITE_AUTH_API_URL ?? "http://127.0.0.1:8001";
@@ -63,8 +87,10 @@ const mainAppUrl = ensureTrailingSlash(
 const languageStorageKey = "worldcup-language";
 let pendingVerificationEmail = "";
 let devVerificationUrl = "";
+let devPasswordResetUrl = "";
 let verificationStatus: VerificationStatus = "idle";
 let verificationFeedback: { state: "success" | "error"; text: string } | null = null;
+let resetFeedback: ResetFeedback = null;
 
 const languageOptions: LanguageOption[] = [
   {
@@ -275,6 +301,53 @@ const authCopy: Record<Language, Record<AuthMode, AuthCopy>> = {
   }
 };
 
+const passwordResetCopy: Record<Language, PasswordResetCopy> = {
+  en: {
+    requestTitle: "Reset your password",
+    requestSummary: "Enter your email or username and we will send a password reset link if the account exists.",
+    identifierLabel: "Email or username",
+    requestSubmit: "Send reset link",
+    requestSent: "If that account exists, a reset link has been sent.",
+    requestError: "Could not send the password reset email right now.",
+    resetTitle: "Choose a new password",
+    resetSummary: "Enter a new password that satisfies the security requirements.",
+    newPasswordLabel: "New password",
+    confirmPasswordLabel: "Confirm new password",
+    resetSubmit: "Reset password",
+    resetSuccess: "Password reset. You can now sign in.",
+    resetError: "This password reset link expired or was already used.",
+    forgotPassword: "Forgot your password?",
+    passwordGuidance: "Password must include:",
+    passwordIncomplete: "Please complete all password requirements.",
+    passwordMismatch: "Both password fields must match.",
+    devResetLink: "Open local password reset link",
+    backToSignIn: "Back to sign in",
+    serviceUnavailable: "Auth service is not running. Start the backend and try again."
+  },
+  es: {
+    requestTitle: "Restablecer contraseña",
+    requestSummary: "Ingresa tu correo o usuario y enviaremos un enlace si la cuenta existe.",
+    identifierLabel: "Correo o usuario",
+    requestSubmit: "Enviar enlace",
+    requestSent: "Si esa cuenta existe, se envió un enlace para restablecer la contraseña.",
+    requestError: "No se pudo enviar el correo para restablecer la contraseña en este momento.",
+    resetTitle: "Elige una nueva contraseña",
+    resetSummary: "Ingresa una nueva contraseña que cumpla los requisitos de seguridad.",
+    newPasswordLabel: "Nueva contraseña",
+    confirmPasswordLabel: "Confirmar nueva contraseña",
+    resetSubmit: "Restablecer contraseña",
+    resetSuccess: "Contraseña restablecida. Ya puedes iniciar sesión.",
+    resetError: "Este enlace para restablecer la contraseña expiró o ya fue usado.",
+    forgotPassword: "¿Olvidaste tu contraseña?",
+    passwordGuidance: "La contraseña debe incluir:",
+    passwordIncomplete: "Completa todos los requisitos de la contraseña.",
+    passwordMismatch: "Ambos campos de contraseña deben coincidir.",
+    devResetLink: "Abrir enlace local para restablecer contraseña",
+    backToSignIn: "Volver a iniciar sesión",
+    serviceUnavailable: "El servicio de autenticación no está corriendo. Inicia el backend e inténtalo de nuevo."
+  }
+};
+
 const app = document.querySelector<HTMLDivElement>("#auth-app");
 
 if (!app) {
@@ -338,6 +411,63 @@ const renderLanguageMenu = (language: Language, copy: AuthCopy) => {
   `;
 };
 
+const wireLanguageMenu = (rerender: () => void) => {
+  const languageTrigger = document.querySelector<HTMLButtonElement>("#language-trigger");
+  const languageMenu = document.querySelector<HTMLDivElement>("#language-menu");
+  const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
+
+  const closeLanguageMenu = () => {
+    languageMenu?.setAttribute("hidden", "");
+    languageTrigger?.setAttribute("aria-expanded", "false");
+  };
+
+  languageTrigger?.addEventListener("click", () => {
+    const isOpen = languageMenu?.hasAttribute("hidden") === false;
+
+    if (isOpen) {
+      closeLanguageMenu();
+      return;
+    }
+
+    languageMenu?.removeAttribute("hidden");
+    languageTrigger.setAttribute("aria-expanded", "true");
+  });
+
+  languageButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextLanguage = button.dataset.language === "es" ? "es" : "en";
+
+      window.localStorage.setItem(languageStorageKey, nextLanguage);
+      rerender();
+    });
+  });
+};
+
+const wirePasswordControls = (requirements: PasswordRequirement[]) => {
+  const passwordInput = document.querySelector<HTMLInputElement>("#password-input");
+  const passwordToggle = document.querySelector<HTMLButtonElement>(".password-toggle");
+  const requirementsList = document.querySelector<HTMLUListElement>("#password-requirements");
+
+  passwordInput?.addEventListener("input", () => {
+    if (requirementsList) {
+      requirementsList.innerHTML = renderPasswordRequirements(passwordInput.value, requirements);
+    }
+  });
+
+  passwordToggle?.addEventListener("click", () => {
+    if (!passwordInput) {
+      return;
+    }
+
+    const isHidden = passwordInput.type === "password";
+
+    passwordInput.type = isHidden ? "text" : "password";
+    passwordToggle.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+    passwordToggle.setAttribute("aria-pressed", String(isHidden));
+    passwordToggle.innerHTML = isHidden ? eyeSlashIcon : eyeIcon;
+  });
+};
+
 const renderVerificationPage = (language: Language = getStoredLanguage()) => {
   const copy = authCopy[language].signin;
   const statusMessage =
@@ -390,6 +520,210 @@ const renderVerificationPage = (language: Language = getStoredLanguage()) => {
       window.localStorage.setItem(languageStorageKey, nextLanguage);
       renderVerificationPage(nextLanguage);
     });
+  });
+};
+
+const renderPasswordResetRequestPage = (language: Language = getStoredLanguage()) => {
+  const copy = authCopy[language].signin;
+  const resetCopy = passwordResetCopy[language];
+
+  document.documentElement.lang = language;
+
+  app.innerHTML = `
+    <section class="auth-shell">
+      <header class="auth-topbar">
+        <a class="brand" href="${mainAppUrl}" aria-label="${copy.brandAria}">
+          <span class="brand-mark" aria-hidden="true">26</span>
+          <span>World Cup Picks</span>
+        </a>
+        <div class="topbar-actions">
+          ${renderLanguageMenu(language, copy)}
+        </div>
+      </header>
+
+      <section class="auth-layout" aria-labelledby="auth-title">
+        <div class="auth-panel">
+          <div class="auth-heading">
+            <p class="eyebrow">${copy.eyebrow}</p>
+            <h1 id="auth-title">${resetCopy.requestTitle}</h1>
+            <p>${resetCopy.requestSummary}</p>
+          </div>
+
+          <form class="auth-form" id="password-reset-request-form" aria-label="${resetCopy.requestTitle}">
+            <label>
+              <span>${resetCopy.identifierLabel}</span>
+              <input type="text" name="identifier" autocomplete="username" required />
+            </label>
+            <p class="form-message" id="form-message" role="status" data-state="${resetFeedback?.state ?? ""}">
+              ${resetFeedback?.text ?? ""}
+            </p>
+            ${
+              devPasswordResetUrl
+                ? `<a class="dev-verification-link" href="${devPasswordResetUrl}">${resetCopy.devResetLink}</a>`
+                : ""
+            }
+            <button class="submit-button" type="submit">${resetCopy.requestSubmit}</button>
+          </form>
+
+          <p class="alternate-action">
+            <button type="button" id="back-to-signin">${resetCopy.backToSignIn}</button>
+          </p>
+        </div>
+      </section>
+    </section>
+  `;
+
+  wireLanguageMenu(() => renderPasswordResetRequestPage(getStoredLanguage()));
+  document.querySelector<HTMLButtonElement>("#back-to-signin")?.addEventListener("click", () => {
+    resetFeedback = null;
+    devPasswordResetUrl = "";
+    window.history.replaceState({}, "", window.location.pathname);
+    render("signin", language);
+  });
+  document.querySelector<HTMLFormElement>("#password-reset-request-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const formData = new FormData(form);
+
+    try {
+      const response = await fetch(`${authApiUrl}/password-resets`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ identifier: String(formData.get("identifier") ?? "") })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? resetCopy.requestError);
+      }
+
+      devPasswordResetUrl = result.devResetUrl ?? "";
+      resetFeedback = { state: "success", text: resetCopy.requestSent };
+      renderPasswordResetRequestPage(language);
+    } catch (error) {
+      resetFeedback = {
+        state: "error",
+        text: error instanceof Error ? error.message : resetCopy.serviceUnavailable
+      };
+      renderPasswordResetRequestPage(language);
+    }
+  });
+};
+
+const renderPasswordResetPage = (token: string, language: Language = getStoredLanguage()) => {
+  const copy = authCopy[language].signin;
+  const resetCopy = passwordResetCopy[language];
+
+  document.documentElement.lang = language;
+
+  app.innerHTML = `
+    <section class="auth-shell">
+      <header class="auth-topbar">
+        <a class="brand" href="${mainAppUrl}" aria-label="${copy.brandAria}">
+          <span class="brand-mark" aria-hidden="true">26</span>
+          <span>World Cup Picks</span>
+        </a>
+        <div class="topbar-actions">
+          ${renderLanguageMenu(language, copy)}
+        </div>
+      </header>
+
+      <section class="auth-layout" aria-labelledby="auth-title">
+        <div class="auth-panel">
+          <div class="auth-heading">
+            <p class="eyebrow">${copy.eyebrow}</p>
+            <h1 id="auth-title">${resetCopy.resetTitle}</h1>
+            <p>${resetCopy.resetSummary}</p>
+          </div>
+
+          <form class="auth-form" id="password-reset-form" aria-label="${resetCopy.resetTitle}">
+            <label>
+              <span>${resetCopy.newPasswordLabel}</span>
+              <span class="password-field">
+                <input id="password-input" type="password" name="password" autocomplete="new-password" required />
+                <button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+                  ${eyeIcon}
+                </button>
+              </span>
+            </label>
+            <label>
+              <span>${resetCopy.confirmPasswordLabel}</span>
+              <input type="password" name="confirmPassword" autocomplete="new-password" required />
+            </label>
+            <div class="password-guidance" aria-live="polite">
+              <p>${resetCopy.passwordGuidance}</p>
+              <ul id="password-requirements">
+                ${renderPasswordRequirements("", copy.passwordRequirements)}
+              </ul>
+            </div>
+            <p class="form-message" id="form-message" role="status" data-state="${resetFeedback?.state ?? ""}">
+              ${resetFeedback?.text ?? ""}
+            </p>
+            <button class="submit-button" type="submit">${resetCopy.resetSubmit}</button>
+          </form>
+
+          <p class="alternate-action">
+            <button type="button" id="back-to-signin">${resetCopy.backToSignIn}</button>
+          </p>
+        </div>
+      </section>
+    </section>
+  `;
+
+  wireLanguageMenu(() => renderPasswordResetPage(token, getStoredLanguage()));
+  wirePasswordControls(copy.passwordRequirements);
+  document.querySelector<HTMLButtonElement>("#back-to-signin")?.addEventListener("click", () => {
+    resetFeedback = null;
+    window.history.replaceState({}, "", window.location.pathname);
+    render("signin", language);
+  });
+  document.querySelector<HTMLFormElement>("#password-reset-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const formData = new FormData(form);
+    const password = String(formData.get("password") ?? "");
+    const confirmPassword = String(formData.get("confirmPassword") ?? "");
+    const missingRequirements = copy.passwordRequirements.filter((requirement) => !requirement.test(password));
+
+    if (missingRequirements.length > 0) {
+      resetFeedback = { state: "error", text: resetCopy.passwordIncomplete };
+      renderPasswordResetPage(token, language);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      resetFeedback = { state: "error", text: resetCopy.passwordMismatch };
+      renderPasswordResetPage(token, language);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${authApiUrl}/password-resets/${encodeURIComponent(token)}`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ password })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? resetCopy.resetError);
+      }
+
+      resetFeedback = { state: "success", text: resetCopy.resetSuccess };
+      window.history.replaceState({}, "", window.location.pathname);
+      render("signin", language);
+    } catch (error) {
+      resetFeedback = {
+        state: "error",
+        text: error instanceof Error ? error.message : resetCopy.serviceUnavailable
+      };
+      renderPasswordResetPage(token, language);
+    }
   });
 };
 
@@ -492,6 +826,15 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
               </span>
             </label>
             ${
+              !isCreateMode
+                ? `
+                  <p class="alternate-action compact-auth-action">
+                    <button type="button" id="forgot-password">${passwordResetCopy[language].forgotPassword}</button>
+                  </p>
+                `
+                : ""
+            }
+            ${
               isCreateMode
                 ? `
                   <div class="password-guidance" aria-live="polite">
@@ -546,6 +889,7 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
   const languageMenu = document.querySelector<HTMLDivElement>("#language-menu");
   const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
   const resendVerificationButton = document.querySelector<HTMLButtonElement>("#resend-verification");
+  const forgotPasswordButton = document.querySelector<HTMLButtonElement>("#forgot-password");
 
   const closeLanguageMenu = () => {
     languageMenu?.setAttribute("hidden", "");
@@ -578,6 +922,13 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
       verificationFeedback = null;
       render(button.dataset.mode === "create" ? "create" : "signin", language);
     });
+  });
+
+  forgotPasswordButton?.addEventListener("click", () => {
+    resetFeedback = null;
+    devPasswordResetUrl = "";
+    window.history.replaceState({}, "", window.location.pathname);
+    renderPasswordResetRequestPage(language);
   });
 
   passwordInput?.addEventListener("input", () => {
@@ -762,6 +1113,7 @@ const render = (mode: AuthMode, language: Language = getStoredLanguage()) => {
 };
 
 const verificationToken = new URLSearchParams(window.location.search).get("verify");
+const resetToken = new URLSearchParams(window.location.search).get("reset");
 
 if (verificationToken) {
   verificationStatus = "loading";
@@ -775,6 +1127,9 @@ if (verificationToken) {
       verificationStatus = "error";
       renderVerificationPage();
     });
+} else if (resetToken) {
+  resetFeedback = null;
+  renderPasswordResetPage(resetToken);
 } else {
   render("signin");
 }

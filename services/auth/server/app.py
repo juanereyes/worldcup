@@ -13,18 +13,22 @@ from auth_service.database import (
     EmailVerificationRecord,
     InvalidCredentialsError,
     InvalidPasswordError,
+    PasswordResetRecord,
     SESSION_DAYS,
     UnverifiedEmailError,
     authenticate_user,
     connect,
     create_email_verification,
+    create_password_reset,
     create_session,
     create_user,
     delete_session,
     delete_user,
+    get_user_by_identifier,
     get_user_by_email,
     get_user_for_session,
     initialize_database,
+    reset_password_with_token,
     verify_email_token,
 )
 from auth_service.password_policy import evaluate_password
@@ -35,6 +39,7 @@ DEFAULT_ALLOWED_ORIGINS = ("http://127.0.0.1:5173", "http://127.0.0.1:5174")
 DEFAULT_COOKIE_SAMESITE = "Lax"
 DEFAULT_AUTH_CLIENT_URL = "http://127.0.0.1:5174/"
 VERIFICATION_MINUTES = 5
+PASSWORD_RESET_MINUTES = 15
 ROOT_DIR = Path(__file__).resolve().parents[3]
 
 
@@ -124,6 +129,10 @@ def get_auth_client_url() -> str:
 
 def verification_link(token: str) -> str:
     return f"{get_auth_client_url()}?verify={token}"
+
+
+def password_reset_link(token: str) -> str:
+    return f"{get_auth_client_url()}?reset={token}"
 
 
 class EmailDeliveryError(RuntimeError):
@@ -216,6 +225,55 @@ def send_verification_email(verification: EmailVerificationRecord) -> bool:
     return True
 
 
+def send_password_reset_email(reset: PasswordResetRecord) -> bool:
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+
+    if not api_key:
+        return False
+
+    sender = os.environ.get("RESEND_FROM_EMAIL", "World Cup Picks <verify@picks-football.com>").strip()
+    link = password_reset_link(reset.token)
+    payload = json.dumps(
+        {
+            "from": sender,
+            "to": [reset.user.email],
+            "subject": "Reset your World Cup Picks password",
+            "html": (
+                "<p>We received a request to reset your World Cup Picks password.</p>"
+                f"<p>This link expires in {PASSWORD_RESET_MINUTES} minutes:</p>"
+                f'<p><a href="{link}">Reset your password</a></p>'
+                "<p>If you did not request this, you can ignore this email.</p>"
+            ),
+            "text": (
+                "We received a request to reset your World Cup Picks password.\n\n"
+                f"This link expires in {PASSWORD_RESET_MINUTES} minutes:\n{link}\n\n"
+                "If you did not request this, you can ignore this email."
+            ),
+        }
+    ).encode("utf-8")
+    request = Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "WorldCupPicksAuth/0.1 (+https://picks-football.com)",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=10):
+            pass
+    except HTTPError as error:
+        raise EmailDeliveryError(resend_error_message(error)) from error
+    except (URLError, OSError) as error:
+        raise EmailDeliveryError("Could not send password reset email.") from error
+
+    return True
+
+
 class AuthRequestHandler(BaseHTTPRequestHandler):
     server_version = "WorldCupAuth/0.1"
 
@@ -288,6 +346,15 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
 
         if self.path == "/email-verifications":
             self.resend_verification_email()
+            return
+
+        if self.path == "/password-resets":
+            self.request_password_reset()
+            return
+
+        if self.path.startswith("/password-resets/"):
+            token = self.path.removeprefix("/password-resets/").strip()
+            self.reset_password(token)
             return
 
         if self.path != "/users":
@@ -510,6 +577,95 @@ class AuthRequestHandler(BaseHTTPRequestHandler):
                     else {}
                 ),
             },
+        )
+
+    def request_password_reset(self) -> None:
+        payload = self.read_json_body()
+
+        if payload is None:
+            self.send_json(400, {"error": "Request body must be valid JSON."})
+            return
+
+        identifier = str(payload.get("identifier", "")).strip()
+
+        if not identifier:
+            self.send_json(400, {"error": "Email or username is required."})
+            return
+
+        with connect() as connection:
+            initialize_database(connection)
+            user = get_user_by_identifier(connection, identifier)
+
+            if user is None:
+                self.send_json(200, {"status": "ok", "emailSent": True})
+                return
+
+            reset = create_password_reset(
+                connection,
+                user,
+                minutes_to_live=PASSWORD_RESET_MINUTES,
+            )
+
+        try:
+            was_email_sent = send_password_reset_email(reset)
+        except EmailDeliveryError as error:
+            self.send_json(502, {"error": str(error)})
+            return
+
+        self.send_json(
+            200,
+            {
+                "status": "sent",
+                "emailSent": was_email_sent,
+                **(
+                    {"devResetUrl": password_reset_link(reset.token)}
+                    if not was_email_sent
+                    else {}
+                ),
+            },
+        )
+
+    def reset_password(self, token: str) -> None:
+        if not token:
+            self.send_json(400, {"error": "Password reset token is required."})
+            return
+
+        payload = self.read_json_body()
+
+        if payload is None:
+            self.send_json(400, {"error": "Request body must be valid JSON."})
+            return
+
+        password = str(payload.get("password", ""))
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                user = reset_password_with_token(connection, token, password)
+            except InvalidPasswordError as error:
+                self.send_json(
+                    400,
+                    {
+                        "error": "Password does not meet requirements.",
+                        "requirements": error.errors,
+                    },
+                    extra_headers=[self.clear_session_cookie_header()],
+                )
+                return
+
+        if user is None:
+            self.send_json(
+                404,
+                {"code": "reset_expired", "error": "Password reset link expired or was already used."},
+                extra_headers=[self.clear_session_cookie_header()],
+            )
+            return
+
+        self.send_json(
+            200,
+            {"status": "reset", "user": self.user_payload(user)},
+            extra_headers=[self.clear_session_cookie_header()],
         )
 
     def read_json_body(self) -> dict[str, Any] | None:

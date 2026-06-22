@@ -55,6 +55,13 @@ class EmailVerificationRecord:
 
 
 @dataclass(frozen=True)
+class PasswordResetRecord:
+    token: str
+    expires_at: datetime
+    user: UserRecord
+
+
+@dataclass(frozen=True)
 class SessionRecord:
     token: str
     expires_at: datetime
@@ -120,6 +127,18 @@ def initialize_database(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS email_verifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS password_resets (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL,
           token_hash TEXT NOT NULL UNIQUE,
@@ -250,6 +269,20 @@ def get_user_by_email(connection: sqlite3.Connection, email: str) -> UserRecord 
     return row_to_user(row) if row else None
 
 
+def get_user_by_identifier(connection: sqlite3.Connection, identifier: str) -> UserRecord | None:
+    normalized_identifier = identifier.strip()
+    row = connection.execute(
+        """
+        SELECT id, username, email, display_name, email_verified
+        FROM users
+        WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE
+        """,
+        (normalized_identifier, normalized_identifier),
+    ).fetchone()
+
+    return row_to_user(row) if row else None
+
+
 def create_email_verification(
     connection: sqlite3.Connection,
     user: UserRecord,
@@ -275,6 +308,33 @@ def create_email_verification(
     connection.commit()
 
     return EmailVerificationRecord(token=token, expires_at=expires_at, user=user)
+
+
+def create_password_reset(
+    connection: sqlite3.Connection,
+    user: UserRecord,
+    *,
+    minutes_to_live: int = 15,
+) -> PasswordResetRecord:
+    token = secrets.token_urlsafe(32)
+    token_hash = hash_session_token(token)
+    created_at = datetime.now(timezone.utc)
+    expires_at = created_at + timedelta(minutes=minutes_to_live)
+
+    connection.execute(
+        "DELETE FROM password_resets WHERE user_id = ?",
+        (user.id,),
+    )
+    connection.execute(
+        """
+        INSERT INTO password_resets (user_id, token_hash, created_at, expires_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (user.id, token_hash, created_at.isoformat(), expires_at.isoformat()),
+    )
+    connection.commit()
+
+    return PasswordResetRecord(token=token, expires_at=expires_at, user=user)
 
 
 def verify_email_token(connection: sqlite3.Connection, token: str) -> UserRecord | None:
@@ -338,6 +398,76 @@ def verify_email_token(connection: sqlite3.Connection, token: str) -> UserRecord
     ).fetchone()
 
     return row_to_user(verified_row) if verified_row else None
+
+
+def reset_password_with_token(connection: sqlite3.Connection, token: str, password: str) -> UserRecord | None:
+    errors = password_errors(password)
+
+    if errors:
+        raise InvalidPasswordError(errors)
+
+    token_hash = hash_session_token(token)
+    now = datetime.now(timezone.utc)
+    row = connection.execute(
+        """
+        SELECT
+          password_resets.id AS reset_id,
+          password_resets.expires_at,
+          users.id,
+          users.username,
+          users.email,
+          users.display_name,
+          users.email_verified
+        FROM password_resets
+        JOIN users ON users.id = password_resets.user_id
+        WHERE password_resets.token_hash = ?
+        """,
+        (token_hash,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    reset_id = int(row["reset_id"])
+    expires_at = datetime.fromisoformat(str(row["expires_at"]))
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if now >= expires_at:
+        connection.execute(
+            "DELETE FROM password_resets WHERE id = ?",
+            (reset_id,),
+        )
+        connection.commit()
+        return None
+
+    password_hash = password_hasher.hash(password)
+    user_id = int(row["id"])
+    connection.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (password_hash, user_id),
+    )
+    connection.execute(
+        "DELETE FROM password_resets WHERE id = ?",
+        (reset_id,),
+    )
+    connection.execute(
+        "DELETE FROM sessions WHERE user_id = ?",
+        (user_id,),
+    )
+    connection.commit()
+
+    updated_row = connection.execute(
+        """
+        SELECT id, username, email, display_name, email_verified
+        FROM users
+        WHERE id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+    return row_to_user(updated_row) if updated_row else None
 
 
 def create_session(connection: sqlite3.Connection, user: UserRecord) -> SessionRecord:
