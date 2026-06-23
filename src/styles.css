@@ -789,6 +789,39 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   text-transform: uppercase;
 }
 
+.prediction-save-summary {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(24, 42, 34, 0.08);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-weight: 850;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 12px 14px;
+}
+
+.prediction-save-summary.is-saving {
+  color: var(--blue);
+}
+
+.prediction-save-summary.is-saved {
+  color: var(--green);
+}
+
+.prediction-save-summary.is-error {
+  color: var(--red);
+}
+
+.prediction-save-summary .secondary-action {
+  min-height: 38px;
+  padding: 0 12px;
+}
+
 .prediction-dropdown-trigger {
   background: var(--surface);
   border: 1px solid var(--line);

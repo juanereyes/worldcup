@@ -479,6 +479,12 @@ type Copy = {
     saveSaving: string;
     saveSaved: string;
     saveError: string;
+    saveStatusIdle: string;
+    saveStatusSaving: (count: number) => string;
+    saveStatusSaved: string;
+    saveStatusError: (count: number) => string;
+    retryFailedSaves: string;
+    saveLeaveWarning: string;
     matchClosed: string;
     homeScore: string;
     awayScore: string;
@@ -572,6 +578,7 @@ const authClientUrl = ensureTrailingSlash(
 const authApiUrl = import.meta.env.VITE_AUTH_API_URL ?? "http://127.0.0.1:8001";
 const matchesApiUrl = import.meta.env.VITE_MATCHES_API_URL ?? "http://127.0.0.1:8002";
 const lobbiesApiUrl = import.meta.env.VITE_LOBBIES_API_URL ?? "http://127.0.0.1:8003";
+const predictionSaveDelayMs = 500;
 const lobbyCreationDraftStorageKey = "worldcup-lobby-creation-draft";
 const defaultPredictionLobbyCode = "__default__";
 const defaultCustomSettingValues: Record<CustomNumericFieldId, string> = {
@@ -633,6 +640,11 @@ let lobbyScoreboard: LobbyScoreboard | null = null;
 let matchPredictions: Record<number, MatchPrediction> = {};
 let specialPredictions: Record<string, SpecialPrediction> = {};
 let predictionSaveStates: Record<number, PredictionSaveState> = {};
+let predictionSaveTimers: Record<number, number> = {};
+let predictionSaveVersions: Record<number, number> = {};
+let activePredictionSaves = new Set<number>();
+let queuedPredictionSaves = new Set<number>();
+let failedPredictionSaves = new Set<number>();
 let selectedPredictionLobbyCode = defaultPredictionLobbyCode;
 let selectedPredictionPhase = "";
 let openPredictionDropdown: "lobby" | "phase" | null = null;
@@ -1159,6 +1171,12 @@ const copy: Record<Language, Copy> = {
       saveSaving: "Saving...",
       saveSaved: "Saved",
       saveError: "Could not save",
+      saveStatusIdle: "No prediction changes yet.",
+      saveStatusSaving: (count) => `Saving ${count} prediction${count === 1 ? "" : "s"}...`,
+      saveStatusSaved: "All predictions saved.",
+      saveStatusError: (count) => `${count} prediction${count === 1 ? "" : "s"} could not be saved.`,
+      retryFailedSaves: "Retry failed saves",
+      saveLeaveWarning: "Some predictions are still saving. Leave anyway?",
       matchClosed: "Closed",
       homeScore: "Home score",
       awayScore: "Away score"
@@ -1531,6 +1549,12 @@ const copy: Record<Language, Copy> = {
       saveSaving: "Guardando...",
       saveSaved: "Guardado",
       saveError: "No se pudo guardar",
+      saveStatusIdle: "Todavía no hay cambios en tus pronósticos.",
+      saveStatusSaving: (count) => `Guardando ${count} pronóstico${count === 1 ? "" : "s"}...`,
+      saveStatusSaved: "Todos los pronósticos están guardados.",
+      saveStatusError: (count) => `No se pudo guardar ${count} pronóstico${count === 1 ? "" : "s"}.`,
+      retryFailedSaves: "Reintentar guardados fallidos",
+      saveLeaveWarning: "Algunos pronósticos todavía se están guardando. ¿Salir de todas formas?",
       matchClosed: "Cerrado",
       homeScore: "Goles local",
       awayScore: "Goles visitante"
@@ -2909,6 +2933,64 @@ const getPredictionSaveLabel = (selectedCopy: Copy, matchId: number) => {
   }[state];
 };
 
+const getPendingPredictionSaveIds = () =>
+  new Set<number>([
+    ...Object.keys(predictionSaveTimers).map((matchId) => Number(matchId)),
+    ...activePredictionSaves,
+    ...queuedPredictionSaves
+  ]);
+const hasPendingPredictionSaves = () => getPendingPredictionSaveIds().size > 0;
+
+const canChangePredictionContext = () => {
+  if (!hasPendingPredictionSaves()) {
+    return true;
+  }
+
+  window.alert(copy[getStoredLanguage()].predictionsPage.saveLeaveWarning);
+  return false;
+};
+
+const getPredictionSaveSummary = (selectedCopy: Copy) => {
+  const pendingCount = getPendingPredictionSaveIds().size;
+  const failedCount = failedPredictionSaves.size;
+
+  if (failedCount > 0) {
+    return {
+      label: selectedCopy.predictionsPage.saveStatusError(failedCount),
+      state: "error" as const
+    };
+  }
+
+  if (pendingCount > 0) {
+    return {
+      label: selectedCopy.predictionsPage.saveStatusSaving(pendingCount),
+      state: "saving" as const
+    };
+  }
+
+  const hasSavedPredictions = Object.keys(matchPredictions).length > 0;
+
+  return {
+    label: hasSavedPredictions ? selectedCopy.predictionsPage.saveStatusSaved : selectedCopy.predictionsPage.saveStatusIdle,
+    state: hasSavedPredictions ? ("saved" as const) : ("idle" as const)
+  };
+};
+
+const renderPredictionSaveSummary = (selectedCopy: Copy) => {
+  const summary = getPredictionSaveSummary(selectedCopy);
+
+  return `
+    <div class="prediction-save-summary is-${summary.state}" data-prediction-save-summary>
+      <span>${summary.label}</span>
+      ${
+        summary.state === "error"
+          ? `<button class="secondary-action" type="button" id="retry-prediction-saves">${selectedCopy.predictionsPage.retryFailedSaves}</button>`
+          : ""
+      }
+    </div>
+  `;
+};
+
 const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, language: Language) => {
   const saveState = predictionSaveStates[match.id] ?? "idle";
   const isOpen = isMatchPredictionOpen(match);
@@ -3045,6 +3127,7 @@ const renderPredictionsPage = (selectedCopy: Copy, language: Language) => {
                       : ""
                   }
                 </div>
+                ${renderPredictionSaveSummary(selectedCopy)}
                 ${
                   filteredMatches.length === 0
                     ? `<div class="matches-state">${selectedCopy.predictionsPage.emptyMatches}</div>`
@@ -4979,6 +5062,7 @@ const render = (language: Language) => {
   const predictionCopyCloseButton = document.querySelector<HTMLButtonElement>("#prediction-copy-close");
   const predictionCopyCancelButton = document.querySelector<HTMLButtonElement>("#prediction-copy-cancel");
   const predictionCopyConfirmButton = document.querySelector<HTMLButtonElement>("#prediction-copy-confirm");
+  const predictionRetryButton = document.querySelector<HTMLButtonElement>("#retry-prediction-saves");
   const globalPlacementPredictionButtons = document.querySelectorAll<HTMLButtonElement>("[data-global-placement-prediction]");
   const globalPlacementBackdrop = document.querySelector<HTMLDivElement>("#global-placement-backdrop");
   const globalPlacementCloseButton = document.querySelector<HTMLButtonElement>("#global-placement-close");
@@ -5276,10 +5360,17 @@ const render = (language: Language) => {
 
   predictionLobbyButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      selectedPredictionLobbyCode = button.dataset.predictionLobby ?? defaultPredictionLobbyCode;
+      const nextLobbyCode = button.dataset.predictionLobby ?? defaultPredictionLobbyCode;
+
+      if (nextLobbyCode !== selectedPredictionLobbyCode && !canChangePredictionContext()) {
+        return;
+      }
+
+      selectedPredictionLobbyCode = nextLobbyCode;
       openPredictionDropdown = null;
       matchPredictions = {};
       predictionSaveStates = {};
+      failedPredictionSaves.clear();
       void loadMatchPredictions();
       render(getStoredLanguage());
     });
@@ -5340,6 +5431,7 @@ const render = (language: Language) => {
       void copyDefaultPredictionsToSelectedLobby(predictionCopyModal.scope, selectedCopy);
     }
   });
+  predictionRetryButton?.addEventListener("click", retryFailedPredictionSaves);
 
   const closeGlobalPlacementPredictionModal = () => {
     globalPlacementPredictionModal = {
@@ -5491,7 +5583,7 @@ const render = (language: Language) => {
         [matchId]: "saving"
       };
       updatePredictionSaveIndicator(matchId);
-      void saveMatchPrediction(matchId);
+      scheduleMatchPredictionSave(matchId);
     });
   });
 
@@ -6599,13 +6691,95 @@ const updatePredictionSaveIndicator = (matchId: number) => {
   indicator.textContent = getPredictionSaveLabel(selectedCopy, matchId);
 };
 
-const saveMatchPrediction = async (matchId: number) => {
+const updatePredictionSaveSummary = () => {
+  const language = getStoredLanguage();
+  const selectedCopy = copy[language];
+  const indicator = document.querySelector<HTMLElement>("[data-prediction-save-summary]");
+
+  if (!indicator) {
+    return;
+  }
+
+  const summary = getPredictionSaveSummary(selectedCopy);
+  indicator.className = `prediction-save-summary is-${summary.state}`;
+  indicator.innerHTML = `
+    <span>${summary.label}</span>
+    ${
+      summary.state === "error"
+        ? `<button class="secondary-action" type="button" id="retry-prediction-saves">${selectedCopy.predictionsPage.retryFailedSaves}</button>`
+        : ""
+    }
+  `;
+  bindPredictionRetryButton();
+};
+
+const scheduleMatchPredictionSave = (matchId: number, delayMs = predictionSaveDelayMs) => {
+  predictionSaveVersions = {
+    ...predictionSaveVersions,
+    [matchId]: (predictionSaveVersions[matchId] ?? 0) + 1
+  };
+  failedPredictionSaves.delete(matchId);
+
+  if (predictionSaveTimers[matchId]) {
+    window.clearTimeout(predictionSaveTimers[matchId]);
+  }
+
+  predictionSaveTimers = {
+    ...predictionSaveTimers,
+    [matchId]: window.setTimeout(() => {
+      const nextTimers = { ...predictionSaveTimers };
+      delete nextTimers[matchId];
+      predictionSaveTimers = nextTimers;
+      void saveMatchPrediction(matchId, predictionSaveVersions[matchId] ?? 0);
+      updatePredictionSaveSummary();
+    }, delayMs)
+  };
+  updatePredictionSaveSummary();
+};
+
+const retryFailedPredictionSaves = () => {
+  const failedMatchIds = Array.from(failedPredictionSaves);
+
+  failedMatchIds.forEach((matchId) => {
+    if (!matchPredictions[matchId]) {
+      failedPredictionSaves.delete(matchId);
+      return;
+    }
+
+    predictionSaveStates = {
+      ...predictionSaveStates,
+      [matchId]: "saving"
+    };
+    updatePredictionSaveIndicator(matchId);
+    scheduleMatchPredictionSave(matchId, 0);
+  });
+
+  updatePredictionSaveSummary();
+};
+
+function bindPredictionRetryButton() {
+  const retryButton = document.querySelector<HTMLButtonElement>("#retry-prediction-saves");
+
+  retryButton?.addEventListener("click", retryFailedPredictionSaves);
+}
+
+const saveMatchPrediction = async (matchId: number, saveVersion = predictionSaveVersions[matchId] ?? 0) => {
   const lobbyCode = selectedPredictionLobbyCode;
   const prediction = matchPredictions[matchId];
 
   if (!lobbyCode || !prediction) {
     return;
   }
+
+  if (activePredictionSaves.has(matchId)) {
+    queuedPredictionSaves.add(matchId);
+    updatePredictionSaveSummary();
+    return;
+  }
+
+  activePredictionSaves.add(matchId);
+  queuedPredictionSaves.delete(matchId);
+  updatePredictionSaveSummary();
 
   const url =
     lobbyCode === defaultPredictionLobbyCode
@@ -6631,22 +6805,42 @@ const saveMatchPrediction = async (matchId: number) => {
 
     const result = (await response.json()) as { prediction?: MatchPrediction };
     const savedPrediction = result.prediction ?? prediction;
-    matchPredictions = {
-      ...matchPredictions,
-      [matchId]: savedPrediction
-    };
-    predictionSaveStates = {
-      ...predictionSaveStates,
-      [matchId]: "saved"
-    };
+
+    if ((predictionSaveVersions[matchId] ?? 0) === saveVersion) {
+      matchPredictions = {
+        ...matchPredictions,
+        [matchId]: savedPrediction
+      };
+      predictionSaveStates = {
+        ...predictionSaveStates,
+        [matchId]: "saved"
+      };
+      failedPredictionSaves.delete(matchId);
+    }
   } catch {
-    predictionSaveStates = {
-      ...predictionSaveStates,
-      [matchId]: "error"
-    };
+    if ((predictionSaveVersions[matchId] ?? 0) === saveVersion) {
+      predictionSaveStates = {
+        ...predictionSaveStates,
+        [matchId]: "error"
+      };
+      failedPredictionSaves.add(matchId);
+    }
+  } finally {
+    activePredictionSaves.delete(matchId);
+
+    if (queuedPredictionSaves.has(matchId) || (predictionSaveVersions[matchId] ?? 0) !== saveVersion) {
+      queuedPredictionSaves.delete(matchId);
+      predictionSaveStates = {
+        ...predictionSaveStates,
+        [matchId]: "saving"
+      };
+      updatePredictionSaveIndicator(matchId);
+      void saveMatchPrediction(matchId, predictionSaveVersions[matchId] ?? 0);
+    }
   }
 
   updatePredictionSaveIndicator(matchId);
+  updatePredictionSaveSummary();
 };
 
 const openPredictionCopyModal = (scope: PredictionCopyScope) => {
@@ -6661,6 +6855,10 @@ const openPredictionCopyModal = (scope: PredictionCopyScope) => {
 
 const copyDefaultPredictionsToSelectedLobby = async (scope: "all" | "phase", selectedCopy: Copy) => {
   if (!selectedPredictionLobbyCode || selectedPredictionLobbyCode === defaultPredictionLobbyCode) {
+    return;
+  }
+
+  if (!canChangePredictionContext()) {
     return;
   }
 
@@ -6712,6 +6910,7 @@ const copyDefaultPredictionsToSelectedLobby = async (scope: "all" | "phase", sel
         return items;
       }, {})
     };
+    predictions.forEach((prediction) => failedPredictionSaves.delete(prediction.matchId));
     predictionCopyModal = {
       isOpen: false,
       scope: null,
@@ -7304,9 +7503,11 @@ const loadMatchPredictions = async () => {
       items[prediction.matchId] = "saved";
       return items;
     }, {});
+    failedPredictionSaves.clear();
   } catch {
     matchPredictions = {};
     predictionSaveStates = {};
+    failedPredictionSaves.clear();
     predictionsError = "unavailable";
   } finally {
     isPredictionsLoading = false;
@@ -7329,6 +7530,14 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted) {
     void loadCurrentUser();
   }
+});
+window.addEventListener("beforeunload", (event) => {
+  if (getCurrentPage() !== "predictions" || !hasPendingPredictionSaves()) {
+    return;
+  }
+
+  event.preventDefault();
+  event.returnValue = copy[getStoredLanguage()].predictionsPage.saveLeaveWarning;
 });
 void loadCarouselMatches();
 void loadAllMatches();
