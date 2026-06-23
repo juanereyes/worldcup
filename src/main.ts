@@ -2913,6 +2913,8 @@ const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, lan
   const saveState = predictionSaveStates[match.id] ?? "idle";
   const isOpen = isMatchPredictionOpen(match);
   const disabledAttribute = isOpen ? "" : "disabled";
+  const hasFinishedScore = match.status === "FINISHED" && match.score.home !== null && match.score.away !== null;
+  const resultClass = hasFinishedScore ? " has-result" : "";
 
   return `
     <article class="prediction-match-card">
@@ -2921,9 +2923,14 @@ const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, lan
         <strong>${localizeMatchLabel(match.group ?? match.stage, language)}</strong>
       </div>
       <div class="prediction-teams">
-        <label class="prediction-team-row">
+        <label class="prediction-team-row${resultClass}">
           ${renderTeamBadge(match.homeTeam, language)}
           <span>${getTeamDisplayName(match.homeTeam, language)}</span>
+          ${
+            hasFinishedScore
+              ? `<strong class="prediction-actual-score" aria-label="${selectedCopy.match.final} ${match.score.home}">${match.score.home}</strong>`
+              : ""
+          }
           <input
             type="text"
             inputmode="numeric"
@@ -2935,9 +2942,14 @@ const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, lan
             ${disabledAttribute}
           />
         </label>
-        <label class="prediction-team-row">
+        <label class="prediction-team-row${resultClass}">
           ${renderTeamBadge(match.awayTeam, language)}
           <span>${getTeamDisplayName(match.awayTeam, language)}</span>
+          ${
+            hasFinishedScore
+              ? `<strong class="prediction-actual-score" aria-label="${selectedCopy.match.final} ${match.score.away}">${match.score.away}</strong>`
+              : ""
+          }
           <input
             type="text"
             inputmode="numeric"

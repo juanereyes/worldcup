@@ -883,9 +883,21 @@ body[data-page="my-lobbies"] .my-lobbies-section {
   grid-template-columns: 32px minmax(0, 1fr) 64px;
 }
 
+.prediction-team-row.has-result {
+  grid-template-columns: 32px minmax(0, 1fr) 64px minmax(24px, auto);
+}
+
 .prediction-team-row span {
   color: var(--ink);
   font-weight: 800;
+}
+
+.prediction-actual-score {
+  color: var(--red);
+  font-size: 1.5rem;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
 }
 
 .prediction-team-row input {
