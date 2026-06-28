@@ -341,9 +341,17 @@ def bracket_heavy_window_state(schedule: dict[int, MatchSchedule]) -> str:
     if not group_matches or not knockout_matches:
         return "awaiting"
 
-    first_knockout_start = min(match.utc_date for match in knockout_matches)
+    round_of_32_matches = sorted(
+        (match for match in knockout_matches if match.stage == "Last 32"),
+        key=lambda match: match.utc_date,
+    )
+    knockout_closes_at = (
+        round_of_32_matches[1].utc_date
+        if len(round_of_32_matches) > 1
+        else min(match.utc_date for match in knockout_matches)
+    )
 
-    if current_utc_datetime() >= first_knockout_start:
+    if current_utc_datetime() >= knockout_closes_at:
         return "closed"
 
     if all(match.status == "FINISHED" for match in group_matches):

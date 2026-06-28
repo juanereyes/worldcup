@@ -1106,8 +1106,8 @@ const copy: Record<Language, Copy> = {
       predictionWindowClosed: "This prediction window is already closed.",
       globalWindowOpenUntil: (time) => `This prediction window is currently open until ${time}.`,
       bracketWindowAwaiting: "Bracket heavy opens after every group-stage match is finished.",
-      bracketWindowOpen: "Bracket heavy is currently open until the first knockout match begins.",
-      bracketWindowClosed: "Bracket heavy is already closed because the knockout stage has started."
+      bracketWindowOpen: "Bracket heavy is currently open until the next Round of 32 match begins.",
+      bracketWindowClosed: "Bracket heavy is already closed because the extended Round of 32 window has ended."
     },
     lobbyActions: {
       joinTitle: "Join a group",
@@ -1484,8 +1484,8 @@ const copy: Record<Language, Copy> = {
       predictionWindowClosed: "Esta ventana de pronóstico ya está cerrada.",
       globalWindowOpenUntil: (time) => `Esta ventana de pronóstico está abierta hasta ${time}.`,
       bracketWindowAwaiting: "La llave pesada abre cuando terminen todos los partidos de fase de grupos.",
-      bracketWindowOpen: "La llave pesada está abierta hasta que empiece el primer partido de eliminación directa.",
-      bracketWindowClosed: "La llave pesada ya cerró porque empezó la fase eliminatoria."
+      bracketWindowOpen: "La llave pesada está abierta hasta que empiece el próximo partido de dieciseisavos de final.",
+      bracketWindowClosed: "La llave pesada ya cerró porque terminó la ventana extendida de dieciseisavos de final."
     },
     lobbyActions: {
       joinTitle: "Unirse a un grupo",
@@ -2275,9 +2275,26 @@ const getBracketHeavyWindowState = (): PredictionWindowState => {
     return "awaiting";
   }
 
-  const firstKnockoutStart = Math.min(...knockoutMatches.map((match) => new Date(match.utcDate).getTime()));
+  const roundOf32Starts = knockoutMatches
+    .filter((match) => match.stage === "Last 32")
+    .map((match) => new Date(match.utcDate).getTime())
+    .filter((timestamp) => !Number.isNaN(timestamp))
+    .sort((a, b) => a - b);
+  const knockoutStarts = knockoutMatches
+    .map((match) => new Date(match.utcDate).getTime())
+    .filter((timestamp) => !Number.isNaN(timestamp));
+  const closesAt =
+    roundOf32Starts.length > 1
+      ? roundOf32Starts[1]
+      : knockoutStarts.length > 0
+        ? Math.min(...knockoutStarts)
+        : null;
 
-  if (Date.now() >= firstKnockoutStart) {
+  if (closesAt === null) {
+    return "awaiting";
+  }
+
+  if (Date.now() >= closesAt) {
     return "closed";
   }
 

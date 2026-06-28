@@ -134,12 +134,22 @@ class PredictionTimingTest(unittest.TestCase):
                 utc_date=datetime(2026, 6, 28, 19, 0, tzinfo=timezone.utc),
                 status="TIMED",
             ),
+            21: MatchSchedule(
+                id=21,
+                stage="Last 32",
+                group=None,
+                utc_date=datetime(2026, 6, 29, 17, 0, tzinfo=timezone.utc),
+                status="TIMED",
+            ),
         }
 
         with patch("app.current_utc_datetime", return_value=datetime(2026, 6, 28, 18, 0, tzinfo=timezone.utc)):
             self.assertEqual(bracket_heavy_window_state(schedule), "open")
 
         with patch("app.current_utc_datetime", return_value=datetime(2026, 6, 28, 20, 0, tzinfo=timezone.utc)):
+            self.assertEqual(bracket_heavy_window_state(schedule), "open")
+
+        with patch("app.current_utc_datetime", return_value=datetime(2026, 6, 29, 17, 0, tzinfo=timezone.utc)):
             self.assertEqual(bracket_heavy_window_state(schedule), "closed")
 
         schedule[10] = MatchSchedule(
