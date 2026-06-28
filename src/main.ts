@@ -2053,11 +2053,17 @@ const saveSpecialPrediction = async (
   const result = (await response.json()) as { prediction?: SpecialPrediction };
 
   if (result.prediction) {
+    const bracketHeavyScrollState =
+      predictionType === "bracketHeavy" && isBracketHeavyVisible ? getBracketHeavyScrollState() : null;
     specialPredictions = {
       ...specialPredictions,
       [result.prediction.type]: result.prediction
     };
     render(getStoredLanguage());
+
+    if (bracketHeavyScrollState) {
+      restoreBracketHeavyScrollState(bracketHeavyScrollState);
+    }
   }
 };
 
@@ -2374,7 +2380,7 @@ const getKnockoutMatches = () =>
         return stageDifference;
       }
 
-      return new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime();
+      return a.id - b.id;
     });
 
 const getWinnerSide = (match: CarouselMatch) => {
@@ -3385,6 +3391,63 @@ const getValidBracketHeavySelections = (selections: Record<string, string>) => {
   });
 
   return validSelections;
+};
+
+const getBracketHeavyScrollState = () => {
+  const backdrop = document.querySelector<HTMLElement>(".bracket-heavy-backdrop");
+  const modal = document.querySelector<HTMLElement>(".bracket-heavy-modal");
+  const board = document.querySelector<HTMLElement>(".bracket-heavy-board");
+  const scrollingElement = document.scrollingElement;
+
+  return {
+    backdropLeft: backdrop?.scrollLeft ?? 0,
+    backdropTop: backdrop?.scrollTop ?? 0,
+    boardLeft: board?.scrollLeft ?? 0,
+    boardTop: board?.scrollTop ?? 0,
+    documentLeft: scrollingElement?.scrollLeft ?? 0,
+    documentTop: scrollingElement?.scrollTop ?? 0,
+    modalLeft: modal?.scrollLeft ?? 0,
+    modalTop: modal?.scrollTop ?? 0,
+    windowLeft: window.scrollX,
+    windowTop: window.scrollY
+  };
+};
+
+const restoreBracketHeavyScrollState = (scrollState: ReturnType<typeof getBracketHeavyScrollState>) => {
+  const restore = () => {
+    const backdrop = document.querySelector<HTMLElement>(".bracket-heavy-backdrop");
+    const modal = document.querySelector<HTMLElement>(".bracket-heavy-modal");
+    const board = document.querySelector<HTMLElement>(".bracket-heavy-board");
+    const scrollingElement = document.scrollingElement;
+
+    if (backdrop) {
+      backdrop.scrollLeft = scrollState.backdropLeft;
+      backdrop.scrollTop = scrollState.backdropTop;
+    }
+
+    if (modal) {
+      modal.scrollLeft = scrollState.modalLeft;
+      modal.scrollTop = scrollState.modalTop;
+    }
+
+    if (board) {
+      board.scrollLeft = scrollState.boardLeft;
+      board.scrollTop = scrollState.boardTop;
+    }
+
+    if (scrollingElement) {
+      scrollingElement.scrollLeft = scrollState.documentLeft;
+      scrollingElement.scrollTop = scrollState.documentTop;
+    }
+
+    window.scrollTo(scrollState.windowLeft, scrollState.windowTop);
+  };
+
+  window.requestAnimationFrame(() => {
+    restore();
+    window.requestAnimationFrame(restore);
+  });
+  window.setTimeout(restore, 40);
 };
 
 const renderBracketHeavyTeam = (
@@ -6169,6 +6232,7 @@ const render = (language: Language) => {
         return;
       }
 
+      const scrollState = getBracketHeavyScrollState();
       const selections = getServerBracketHeavySelections();
       const nextSelections = {
         ...selections
@@ -6183,6 +6247,7 @@ const render = (language: Language) => {
       const validSelections = getValidBracketHeavySelections(nextSelections);
       void saveSpecialPrediction(currentLobby, "bracketHeavy", { selections: validSelections });
       render(getStoredLanguage());
+      restoreBracketHeavyScrollState(scrollState);
     });
   });
 
