@@ -240,6 +240,17 @@ type PredictionCopyModalState = {
   isSubmitting: boolean;
 };
 
+type CustomPointsModalState = {
+  isOpen: boolean;
+  lobby: Lobby | null;
+  selectedUserId: number | null;
+  points: string;
+  isMenuOpen: boolean;
+  searchQuery: string;
+  message: string | null;
+  isSubmitting: boolean;
+};
+
 type GlobalPlacementPredictionId = "champion" | "runnerUp" | "thirdPlace" | "fourthPlace";
 type PlayerPredictionId = "topScorer" | "goldenBall" | "favoritePlayer";
 
@@ -382,6 +393,15 @@ type Copy = {
     leaveLobby: string;
     kickMember: string;
     deleteLobby: string;
+    addCustomPoints: string;
+    addCustomPointsTitle: string;
+    addCustomPointsUserLabel: string;
+    addCustomPointsSearchUser: string;
+    addCustomPointsChooseUser: string;
+    addCustomPointsValueLabel: string;
+    addCustomPointsConfirm: string;
+    addCustomPointsSuccess: string;
+    addCustomPointsError: string;
     showRules: string;
     myPredictions: string;
     globalPredictions: string;
@@ -736,6 +756,16 @@ let kickMemberModal: KickMemberModalState = {
   message: null,
   isSubmitting: false
 };
+let customPointsModal: CustomPointsModalState = {
+  isOpen: false,
+  lobby: null,
+  selectedUserId: null,
+  points: "",
+  isMenuOpen: false,
+  searchQuery: "",
+  message: null,
+  isSubmitting: false
+};
 let deleteLobbyModal: DeleteLobbyModalState = {
   isOpen: false,
   lobby: null,
@@ -1074,6 +1104,15 @@ const copy: Record<Language, Copy> = {
       leaveLobby: "Leave lobby",
       kickMember: "Kick",
       deleteLobby: "Delete lobby",
+      addCustomPoints: "Add custom points",
+      addCustomPointsTitle: "Add custom points",
+      addCustomPointsUserLabel: "User",
+      addCustomPointsSearchUser: "Search user",
+      addCustomPointsChooseUser: "Choose a user",
+      addCustomPointsValueLabel: "Points to adjust",
+      addCustomPointsConfirm: "Confirm points",
+      addCustomPointsSuccess: "Custom points were added.",
+      addCustomPointsError: "Could not add custom points right now.",
       showRules: "View rules",
       myPredictions: "My predictions",
       globalPredictions: "Global predictions",
@@ -1452,6 +1491,15 @@ const copy: Record<Language, Copy> = {
       leaveLobby: "Salir del lobby",
       kickMember: "Expulsar",
       deleteLobby: "Eliminar lobby",
+      addCustomPoints: "Añadir puntos",
+      addCustomPointsTitle: "Añadir puntos personalizados",
+      addCustomPointsUserLabel: "Usuario",
+      addCustomPointsSearchUser: "Buscar usuario",
+      addCustomPointsChooseUser: "Elige un usuario",
+      addCustomPointsValueLabel: "Puntos a ajustar",
+      addCustomPointsConfirm: "Confirmar puntos",
+      addCustomPointsSuccess: "Los puntos personalizados fueron añadidos.",
+      addCustomPointsError: "No se pudieron añadir puntos personalizados en este momento.",
       showRules: "Ver reglas",
       myPredictions: "Mis pronósticos",
       globalPredictions: "Pronósticos globales",
@@ -2102,6 +2150,16 @@ const getParticipatingTeams = (language: Language) =>
 const sanitizeNonNegativeIntegerInput = (value: string) => value.replace(/\D/g, "").replace(/^0+(\d)/, "$1");
 
 const isNonNegativeIntegerValue = (value: string) => /^(0|[1-9]\d*)$/.test(value);
+
+const sanitizeSignedIntegerInput = (value: string) => {
+  const trimmedValue = value.trim();
+  const sign = trimmedValue.startsWith("-") ? "-" : "";
+  const digits = trimmedValue.replace(/\D/g, "");
+
+  return `${sign}${digits}`;
+};
+
+const isSignedIntegerValue = (value: string) => /^-?\d+$/.test(value.trim());
 
 const escapeHtml = (value: string) =>
   value
@@ -3739,11 +3797,12 @@ const renderLobbyPage = (selectedCopy: Copy, language: Language) => {
                             </a>
                             ${renderGlobalPredictionsDropdown(selectedCopy, language, currentLobby)}
                             ${renderCustomFeatureButtons(selectedCopy, language, currentLobby)}
-                            <button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>
                             ${
                               isAdmin
-                                ? `<button class="danger-action compact-danger-action" type="button" data-delete-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.deleteLobby}</button>`
-                                : ""
+                                ? `<button class="secondary-action compact-secondary-action" type="button" data-custom-points-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.addCustomPoints}</button>
+                                  <button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>
+                                  <button class="danger-action compact-danger-action" type="button" data-delete-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.deleteLobby}</button>`
+                                : `<button class="leave-lobby-button is-visible" type="button" data-leave-lobby-code="${currentLobby.code}">${selectedCopy.lobbyPage.leaveLobby}</button>`
                             }
                           </aside>`
                         : ""
@@ -4181,6 +4240,91 @@ const renderKickMemberModal = (selectedCopy: Copy) => {
           </button>
           <button class="danger-action" type="button" id="kick-member-confirm" ${kickMemberModal.isSubmitting ? "disabled" : ""}>
             ${selectedCopy.kickMember.confirm}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+};
+
+const renderCustomPointsModal = (selectedCopy: Copy) => {
+  if (!customPointsModal.isOpen || !customPointsModal.lobby) {
+    return "";
+  }
+
+  const members = customPointsModal.lobby.members;
+  const selectedMember = members.find((member) => member.userId === customPointsModal.selectedUserId) ?? null;
+  const searchQuery = normalizeSearchText(customPointsModal.searchQuery);
+  const filteredMembers = members.filter((member) => {
+    const username = normalizeSearchText(member.username);
+    const usernameParts = username.split(/\s+/);
+
+    return !searchQuery || username.startsWith(searchQuery) || usernameParts.some((part) => part.startsWith(searchQuery));
+  });
+  const pointsValue = Number(customPointsModal.points);
+  const canConfirm = Boolean(selectedMember && isSignedIntegerValue(customPointsModal.points) && Number.isInteger(pointsValue));
+
+  return `
+    <div class="modal-backdrop" role="presentation" id="custom-points-backdrop">
+      <section class="join-lobby-modal global-placement-modal" role="dialog" aria-modal="true" aria-labelledby="custom-points-title">
+        <div class="modal-header">
+          <h2 id="custom-points-title">${selectedCopy.lobbyPage.addCustomPointsTitle}</h2>
+          <button class="modal-close" type="button" id="custom-points-close" aria-label="${selectedCopy.lobbyActions.cancel}">
+            &times;
+          </button>
+        </div>
+        <div class="tracked-team-control global-placement-country-control">
+          <span>${selectedCopy.lobbyPage.addCustomPointsUserLabel}</span>
+          <button
+            class="tracked-team-trigger"
+            type="button"
+            id="custom-points-user-trigger"
+            aria-expanded="${customPointsModal.isMenuOpen ? "true" : "false"}"
+            aria-haspopup="menu"
+          >
+            ${selectedMember ? escapeHtml(selectedMember.username) : selectedCopy.lobbyPage.addCustomPointsChooseUser}
+          </button>
+          <div class="tracked-team-menu" id="custom-points-user-menu" ${customPointsModal.isMenuOpen ? "" : "hidden"}>
+            <input
+              class="global-placement-search"
+              id="custom-points-user-search"
+              type="text"
+              placeholder="${selectedCopy.lobbyPage.addCustomPointsSearchUser}"
+              value="${escapeHtml(customPointsModal.searchQuery)}"
+            />
+            ${filteredMembers
+              .map(
+                (member) => `
+                  <button
+                    type="button"
+                    data-custom-points-user-id="${member.userId}"
+                    data-custom-points-user-search="${escapeHtml(normalizeSearchText(member.username))}"
+                    aria-current="${member.userId === customPointsModal.selectedUserId ? "true" : "false"}"
+                  >
+                    ${escapeHtml(member.username)}
+                  </button>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+        <label class="join-code-field" for="custom-points-value">
+          <span>${selectedCopy.lobbyPage.addCustomPointsValueLabel}</span>
+          <input
+            id="custom-points-value"
+            type="text"
+            inputmode="text"
+            pattern="-?[0-9]*"
+            value="${escapeHtml(customPointsModal.points)}"
+          />
+        </label>
+        ${customPointsModal.message ? `<p class="join-lobby-message">${customPointsModal.message}</p>` : ""}
+        <div class="modal-actions">
+          <button class="secondary-action" type="button" id="custom-points-cancel">
+            ${selectedCopy.lobbyActions.cancel}
+          </button>
+          <button class="primary-action" type="button" id="custom-points-confirm" ${customPointsModal.isSubmitting || !canConfirm ? "disabled" : ""}>
+            ${selectedCopy.lobbyPage.addCustomPointsConfirm}
           </button>
         </div>
       </section>
@@ -5071,6 +5215,7 @@ const render = (language: Language) => {
   ${renderJoinLobbyModal(selectedCopy)}
   ${renderLeaveLobbyModal(selectedCopy)}
   ${renderKickMemberModal(selectedCopy)}
+  ${renderCustomPointsModal(selectedCopy)}
   ${renderDeleteLobbyModal(selectedCopy)}
   ${renderDeleteAccountModal(selectedCopy)}
   ${renderLobbyRulesModal(selectedCopy, language)}
@@ -5116,6 +5261,15 @@ const render = (language: Language) => {
   const kickMemberCloseButton = document.querySelector<HTMLButtonElement>("#kick-member-close");
   const kickMemberCancelButton = document.querySelector<HTMLButtonElement>("#kick-member-cancel");
   const kickMemberConfirmButton = document.querySelector<HTMLButtonElement>("#kick-member-confirm");
+  const customPointsButtons = document.querySelectorAll<HTMLButtonElement>("[data-custom-points-lobby-code]");
+  const customPointsBackdrop = document.querySelector<HTMLDivElement>("#custom-points-backdrop");
+  const customPointsCloseButton = document.querySelector<HTMLButtonElement>("#custom-points-close");
+  const customPointsCancelButton = document.querySelector<HTMLButtonElement>("#custom-points-cancel");
+  const customPointsUserTrigger = document.querySelector<HTMLButtonElement>("#custom-points-user-trigger");
+  const customPointsUserButtons = document.querySelectorAll<HTMLButtonElement>("[data-custom-points-user-id]");
+  const customPointsUserSearchInput = document.querySelector<HTMLInputElement>("#custom-points-user-search");
+  const customPointsValueInput = document.querySelector<HTMLInputElement>("#custom-points-value");
+  const customPointsConfirmButton = document.querySelector<HTMLButtonElement>("#custom-points-confirm");
   const deleteLobbyButtons = document.querySelectorAll<HTMLButtonElement>("[data-delete-lobby-code]");
   const lobbyRulesToggle = document.querySelector<HTMLButtonElement>("#lobby-rules-toggle");
   const lobbyRulesBackdrop = document.querySelector<HTMLDivElement>("#lobby-rules-backdrop");
@@ -6445,6 +6599,111 @@ const render = (language: Language) => {
     void kickLobbyMember(selectedCopy);
   });
 
+  const closeCustomPointsModal = () => {
+    customPointsModal = {
+      isOpen: false,
+      lobby: null,
+      selectedUserId: null,
+      points: "",
+      isMenuOpen: false,
+      searchQuery: "",
+      message: null,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  };
+
+  customPointsButtons.forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const lobbyCode = button.dataset.customPointsLobbyCode ?? "";
+      const lobby = currentLobby?.code === lobbyCode ? currentLobby : null;
+
+      if (!lobby) {
+        return;
+      }
+
+      customPointsModal = {
+        isOpen: true,
+        lobby,
+        selectedUserId: null,
+        points: "",
+        isMenuOpen: false,
+        searchQuery: "",
+        message: null,
+        isSubmitting: false
+      };
+      render(getStoredLanguage());
+    });
+  });
+
+  customPointsCloseButton?.addEventListener("click", closeCustomPointsModal);
+  customPointsCancelButton?.addEventListener("click", closeCustomPointsModal);
+  customPointsBackdrop?.addEventListener("click", (event) => {
+    if (event.target === customPointsBackdrop) {
+      closeCustomPointsModal();
+    }
+  });
+  customPointsUserTrigger?.addEventListener("click", () => {
+    const isOpening = !customPointsModal.isMenuOpen;
+    customPointsModal = {
+      ...customPointsModal,
+      isMenuOpen: isOpening,
+      searchQuery: isOpening ? "" : customPointsModal.searchQuery
+    };
+    render(getStoredLanguage());
+
+    if (isOpening) {
+      document.querySelector<HTMLInputElement>("#custom-points-user-search")?.focus();
+    }
+  });
+  customPointsUserSearchInput?.addEventListener("input", () => {
+    customPointsModal = {
+      ...customPointsModal,
+      searchQuery: customPointsUserSearchInput.value
+    };
+    const query = normalizeSearchText(customPointsUserSearchInput.value);
+    customPointsUserButtons.forEach((button) => {
+      const searchableName = button.dataset.customPointsUserSearch ?? "";
+      button.hidden = Boolean(query) && !searchableName.startsWith(query);
+    });
+  });
+  customPointsUserButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const userId = Number(button.dataset.customPointsUserId);
+
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return;
+      }
+
+      customPointsModal = {
+        ...customPointsModal,
+        selectedUserId: userId,
+        isMenuOpen: false,
+        searchQuery: "",
+        message: null
+      };
+      render(getStoredLanguage());
+    });
+  });
+  customPointsValueInput?.addEventListener("input", () => {
+    const nextValue = sanitizeSignedIntegerInput(customPointsValueInput.value);
+    customPointsValueInput.value = nextValue;
+    customPointsModal = {
+      ...customPointsModal,
+      points: nextValue,
+      message: null
+    };
+    if (customPointsConfirmButton) {
+      customPointsConfirmButton.disabled =
+        !customPointsModal.selectedUserId || !isSignedIntegerValue(nextValue) || !Number.isInteger(Number(nextValue));
+    }
+  });
+  customPointsConfirmButton?.addEventListener("click", () => {
+    void addCustomPoints(selectedCopy);
+  });
+
   const closeDeleteLobbyModal = () => {
     deleteLobbyModal = {
       isOpen: false,
@@ -7182,6 +7441,62 @@ const kickLobbyMember = async (selectedCopy: Copy) => {
     kickMemberModal = {
       ...kickMemberModal,
       message: selectedCopy.kickMember.error,
+      isSubmitting: false
+    };
+    render(getStoredLanguage());
+  }
+};
+
+const addCustomPoints = async (selectedCopy: Copy) => {
+  const user = await getAuthenticatedUser();
+  const lobby = customPointsModal.lobby;
+  const targetUserId = customPointsModal.selectedUserId;
+  const points = Number(customPointsModal.points);
+
+  if (!user || !lobby || !targetUserId || !isSignedIntegerValue(customPointsModal.points) || !Number.isInteger(points)) {
+    return;
+  }
+
+  customPointsModal = {
+    ...customPointsModal,
+    isSubmitting: true,
+    message: null
+  };
+  render(getStoredLanguage());
+
+  try {
+    const response = await fetch(`${lobbiesApiUrl}/lobbies/${encodeURIComponent(lobby.code)}/custom-points`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        userId: targetUserId,
+        points
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not add custom points.");
+    }
+
+    customPointsModal = {
+      isOpen: false,
+      lobby: null,
+      selectedUserId: null,
+      points: "",
+      isMenuOpen: false,
+      searchQuery: "",
+      message: null,
+      isSubmitting: false
+    };
+    await loadLobbyScoreboard(lobby.code);
+    render(getStoredLanguage());
+  } catch {
+    customPointsModal = {
+      ...customPointsModal,
+      message: selectedCopy.lobbyPage.addCustomPointsError,
       isSubmitting: false
     };
     render(getStoredLanguage());

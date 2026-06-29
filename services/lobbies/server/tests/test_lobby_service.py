@@ -20,6 +20,7 @@ from lobby_service.database import (
     LobbyPermissionError,
     LobbyPasswordRequiredError,
     add_lobby_member,
+    add_custom_points_by_admin,
     connect,
     copy_default_predictions_to_lobby,
     create_lobby,
@@ -27,6 +28,7 @@ from lobby_service.database import (
     get_lobby,
     get_lobby_for_member,
     initialize_database,
+    list_lobby_custom_point_adjustments,
     list_default_match_predictions,
     list_user_lobbies,
     list_match_predictions,
@@ -558,6 +560,107 @@ class LobbyServiceTest(unittest.TestCase):
                 code=lobby.code,
                 acting_user_id=2,
                 target_user_id=3,
+            )
+
+    def test_admin_can_add_custom_points_to_member(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        adjustment = add_custom_points_by_admin(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+            target_user_id=2,
+            points=7,
+        )
+        adjustments = list_lobby_custom_point_adjustments(
+            self.connection,
+            code=lobby.code,
+            requesting_user_id=1,
+        )
+
+        self.assertEqual(adjustment.user_id, 2)
+        self.assertEqual(adjustment.points, 7)
+        self.assertEqual(len(adjustments), 1)
+        self.assertEqual(adjustments[0].username, "ana")
+
+    def test_admin_can_subtract_custom_points_from_member(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        adjustment = add_custom_points_by_admin(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+            target_user_id=2,
+            points=-3,
+        )
+
+        self.assertEqual(adjustment.user_id, 2)
+        self.assertEqual(adjustment.points, -3)
+
+    def test_admin_can_add_zero_custom_points_to_member(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        adjustment = add_custom_points_by_admin(
+            self.connection,
+            code=lobby.code,
+            acting_user_id=1,
+            target_user_id=2,
+            points=0,
+        )
+
+        self.assertEqual(adjustment.user_id, 2)
+        self.assertEqual(adjustment.points, 0)
+
+    def test_non_admin_cannot_add_custom_points(self) -> None:
+        lobby = create_lobby(
+            self.connection,
+            created_by_user_id=1,
+            created_by_username="juan",
+        )
+        add_lobby_member(
+            self.connection,
+            code=lobby.code,
+            user_id=2,
+            username="ana",
+        )
+
+        with self.assertRaises(LobbyPermissionError):
+            add_custom_points_by_admin(
+                self.connection,
+                code=lobby.code,
+                acting_user_id=2,
+                target_user_id=1,
+                points=5,
             )
 
     def test_admin_can_delete_lobby(self) -> None:

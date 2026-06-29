@@ -107,6 +107,14 @@ class MemberSpecialPredictionRecord:
     selections: dict[str, str] | None
 
 
+@dataclass(frozen=True)
+class CustomPointAdjustmentRecord:
+    user_id: int
+    username: str
+    points: int
+    created_at: str
+
+
 def get_database_path() -> Path:
     configured_path = os.environ.get("LOBBIES_DB_PATH")
     return Path(configured_path) if configured_path else DEFAULT_DB_PATH
@@ -213,6 +221,22 @@ def initialize_database(connection: sqlite3.Connection) -> None:
     )
     connection.execute(
         """
+        CREATE TABLE IF NOT EXISTS custom_point_adjustments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lobby_code TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          points INTEGER NOT NULL,
+          created_by_user_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (lobby_code, user_id) REFERENCES lobby_members(lobby_code, user_id) ON DELETE CASCADE,
+          FOREIGN KEY (lobby_code, created_by_user_id) REFERENCES lobby_members(lobby_code, user_id) ON DELETE CASCADE
+        )
+        """
+    )
+    _migrate_custom_point_adjustments_constraint(connection)
+    connection.execute(
+        """
         UPDATE lobbies
         SET member_count = (
           SELECT COUNT(*)
@@ -222,6 +246,55 @@ def initialize_database(connection: sqlite3.Connection) -> None:
         """
     )
     connection.commit()
+
+
+def _migrate_custom_point_adjustments_constraint(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'custom_point_adjustments'"
+    ).fetchone()
+
+    if row is None or ("points > 0" not in row["sql"] and "points <> 0" not in row["sql"]):
+        return
+
+    connection.execute("ALTER TABLE custom_point_adjustments RENAME TO custom_point_adjustments_old")
+    connection.execute(
+        """
+        CREATE TABLE custom_point_adjustments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lobby_code TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          points INTEGER NOT NULL,
+          created_by_user_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (lobby_code, user_id) REFERENCES lobby_members(lobby_code, user_id) ON DELETE CASCADE,
+          FOREIGN KEY (lobby_code, created_by_user_id) REFERENCES lobby_members(lobby_code, user_id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO custom_point_adjustments (
+          id,
+          lobby_code,
+          user_id,
+          username,
+          points,
+          created_by_user_id,
+          created_at
+        )
+        SELECT
+          id,
+          lobby_code,
+          user_id,
+          username,
+          points,
+          created_by_user_id,
+          created_at
+        FROM custom_point_adjustments_old
+        """
+    )
+    connection.execute("DROP TABLE custom_point_adjustments_old")
 
 
 def generate_lobby_code() -> str:
@@ -798,6 +871,39 @@ def list_lobby_special_predictions(
     return records
 
 
+def list_lobby_custom_point_adjustments(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    requesting_user_id: int,
+) -> list[CustomPointAdjustmentRecord]:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_member(connection, normalized_code, requesting_user_id):
+        raise LobbyPermissionError("Only lobby members can view the scoreboard.")
+
+    rows = connection.execute(
+        """
+        SELECT user_id, username, points, created_at
+        FROM custom_point_adjustments
+        WHERE lobby_code = ?
+        ORDER BY created_at ASC, id ASC
+        """,
+        (normalized_code,),
+    ).fetchall()
+
+    return [
+        CustomPointAdjustmentRecord(
+            user_id=int(row["user_id"]),
+            username=str(row["username"]),
+            points=int(row["points"]),
+            created_at=str(row["created_at"]),
+        )
+        for row in rows
+    ]
+
+
 def save_special_prediction(
     connection: sqlite3.Connection,
     *,
@@ -868,6 +974,66 @@ def save_special_prediction(
         prediction
         for prediction in predictions
         if prediction.user_id == user_id and prediction.prediction_type == normalized_type
+    )
+
+
+def add_custom_points_by_admin(
+    connection: sqlite3.Connection,
+    *,
+    code: str,
+    acting_user_id: int,
+    target_user_id: int,
+    points: int,
+) -> CustomPointAdjustmentRecord:
+    normalized_code = code.strip().upper()
+    get_lobby(connection, normalized_code)
+
+    if not _is_lobby_admin(connection, normalized_code, acting_user_id):
+        raise LobbyPermissionError("Only lobby admins can add custom points.")
+
+    target_member = _get_lobby_member(connection, normalized_code, target_user_id)
+
+    if target_member is None:
+        raise LobbyMemberNotFoundError("Lobby member was not found.")
+
+    cursor = connection.execute(
+        """
+        INSERT INTO custom_point_adjustments (
+          lobby_code,
+          user_id,
+          username,
+          points,
+          created_by_user_id,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (normalized_code, target_user_id, target_member.username, points, acting_user_id),
+    )
+    connection.commit()
+
+    row = connection.execute(
+        """
+        SELECT user_id, username, points, created_at
+        FROM custom_point_adjustments
+        WHERE id = ?
+        """,
+        (cursor.lastrowid,),
+    ).fetchone()
+
+    if row is None:
+        return CustomPointAdjustmentRecord(
+            user_id=target_user_id,
+            username=target_member.username,
+            points=points,
+            created_at="",
+        )
+
+    return CustomPointAdjustmentRecord(
+        user_id=int(row["user_id"]),
+        username=str(row["username"]),
+        points=int(row["points"]),
+        created_at=str(row["created_at"]),
     )
 
 
@@ -1046,6 +1212,27 @@ def _is_lobby_member(connection: sqlite3.Connection, code: str, user_id: int) ->
     ).fetchone()
 
     return row is not None
+
+
+def _get_lobby_member(connection: sqlite3.Connection, code: str, user_id: int) -> LobbyMemberRecord | None:
+    row = connection.execute(
+        """
+        SELECT user_id, username, role, joined_at
+        FROM lobby_members
+        WHERE lobby_code = ? AND user_id = ?
+        """,
+        (code, user_id),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return LobbyMemberRecord(
+        user_id=int(row["user_id"]),
+        username=str(row["username"]),
+        role=str(row["role"]),
+        joined_at=str(row["joined_at"]) if row["joined_at"] else "",
+    )
 
 
 def _is_lobby_admin(connection: sqlite3.Connection, code: str, user_id: int) -> bool:

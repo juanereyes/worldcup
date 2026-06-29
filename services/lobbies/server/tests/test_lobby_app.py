@@ -18,7 +18,13 @@ from app import (
     global_prediction_closes_at,
     validate_auth_session,
 )
-from lobby_service.database import LobbyMemberRecord, LobbyRecord, MemberMatchPredictionRecord, MemberSpecialPredictionRecord
+from lobby_service.database import (
+    CustomPointAdjustmentRecord,
+    LobbyMemberRecord,
+    LobbyRecord,
+    MemberMatchPredictionRecord,
+    MemberSpecialPredictionRecord,
+)
 
 
 class FakeAuthResponse:
@@ -215,6 +221,37 @@ class LobbyScoreboardTest(unittest.TestCase):
         self.assertEqual(rows["juan"]["totalPoints"], 2)
         self.assertEqual(rows["juan"]["groupStagePoints"], 2)
         self.assertEqual(rows["juan"]["knockoutStagePoints"], 0)
+
+    def test_build_scoreboard_adds_custom_points_to_general_and_daily_points(self) -> None:
+        lobby = LobbyRecord(
+            code="ABCD",
+            name="Friends",
+            requires_password=False,
+            member_count=1,
+            point_system="simple",
+            custom_settings=None,
+            members=[LobbyMemberRecord(user_id=1, username="ana", role="admin")],
+        )
+        adjustments = [
+            CustomPointAdjustmentRecord(
+                user_id=1,
+                username="ana",
+                points=9,
+                created_at="2026-06-28 15:00:00",
+            )
+        ]
+
+        with patch("app.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = datetime(2026, 6, 28, 18, 0, tzinfo=timezone.utc)
+            mocked_datetime.fromisoformat.side_effect = datetime.fromisoformat
+            payload = build_scoreboard_payload(lobby, [], {}, custom_point_adjustments=adjustments)
+
+        row = payload["scoreboard"]["general"][0]
+
+        self.assertEqual(row["totalPoints"], 9)
+        self.assertEqual(row["dailyPoints"], 9)
+        self.assertEqual(payload["scoreboard"]["groupStage"][0]["groupStagePoints"], 0)
+        self.assertEqual(payload["scoreboard"]["knockoutStage"][0]["knockoutStagePoints"], 0)
 
     def test_scoreboard_uses_default_prediction_when_lobby_prediction_is_incomplete(self) -> None:
         lobby = LobbyRecord(

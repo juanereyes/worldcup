@@ -24,6 +24,7 @@ from lobby_service.database import (
     LobbyPasswordRequiredError,
     LobbyRecord,
     MatchPredictionRecord,
+    add_custom_points_by_admin,
     add_lobby_member,
     connect,
     copy_default_predictions_to_lobby,
@@ -32,6 +33,7 @@ from lobby_service.database import (
     get_lobby_for_member,
     initialize_database,
     list_default_match_predictions,
+    list_lobby_custom_point_adjustments,
     list_lobby_member_default_match_predictions,
     list_lobby_match_predictions,
     list_lobby_special_predictions,
@@ -376,6 +378,21 @@ def is_complete_prediction(prediction: Any) -> bool:
     return prediction.home_score is not None and prediction.away_score is not None
 
 
+def custom_point_adjustment_date(adjustment: Any) -> str:
+    try:
+        created_at = str(adjustment.created_at)
+        normalized = created_at if "T" in created_at else created_at.replace(" ", "T")
+        if normalized.endswith("Z"):
+            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(BOGOTA_TZ).date().isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
 def apply_default_predictions_for_finished_matches(
     predictions: list[Any],
     default_predictions: list[Any],
@@ -405,6 +422,7 @@ def build_scoreboard_payload(
     matches: dict[int, FinishedMatch],
     special_predictions: list[Any] | None = None,
     default_predictions: list[Any] | None = None,
+    custom_point_adjustments: list[Any] | None = None,
 ) -> dict[str, Any]:
     today = datetime.now(BOGOTA_TZ).date().isoformat()
     rows = {
@@ -466,6 +484,17 @@ def build_scoreboard_payload(
 
         row["totalPoints"] += points["total"]
         row["knockoutStagePoints"] += points["knockoutStage"]
+
+    for adjustment in custom_point_adjustments or []:
+        row = rows.get(adjustment.user_id)
+
+        if row is None:
+            continue
+
+        row["totalPoints"] += adjustment.points
+
+        if custom_point_adjustment_date(adjustment) == today:
+            row["dailyPoints"] += adjustment.points
 
     return {
         "scoreboard": {
@@ -1044,6 +1073,10 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
             self.add_lobby_member(path_parts[1])
             return
 
+        if len(path_parts) == 3 and path_parts[0] == "lobbies" and path_parts[2] == "custom-points":
+            self.add_lobby_custom_points(path_parts[1])
+            return
+
         if parsed.path != "/lobbies":
             self.send_json(404, {"error": "Not found."})
             return
@@ -1155,6 +1188,77 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 return
 
         self.send_json(200, {"lobby": self.lobby_payload(lobby)})
+
+    def add_lobby_custom_points(self, code: str) -> None:
+        payload = self.read_json_body()
+
+        if payload is None:
+            self.send_json(400, {"error": "Request body must be valid JSON."})
+            return
+
+        try:
+            target_user_id = int(payload.get("userId"))
+        except (TypeError, ValueError):
+            self.send_json(400, {"error": "User id must be a number."})
+            return
+
+        raw_points = payload.get("points")
+        if isinstance(raw_points, bool):
+            self.send_json(400, {"error": "Points must be an integer."})
+            return
+
+        if isinstance(raw_points, int):
+            points = raw_points
+        elif isinstance(raw_points, str):
+            normalized_points = raw_points.strip()
+            unsigned_points = normalized_points[1:] if normalized_points.startswith("-") else normalized_points
+            if not unsigned_points.isdigit():
+                self.send_json(400, {"error": "Points must be an integer."})
+                return
+            points = int(normalized_points)
+        else:
+            self.send_json(400, {"error": "Points must be an integer."})
+            return
+
+        with connect() as connection:
+            initialize_database(connection)
+
+            try:
+                authenticated_user = self.get_authenticated_user()
+                adjustment = add_custom_points_by_admin(
+                    connection,
+                    code=code,
+                    acting_user_id=int(authenticated_user["id"]),
+                    target_user_id=target_user_id,
+                    points=points,
+                )
+            except AuthenticationError as error:
+                self.send_json(401, {"code": "not_authenticated", "error": str(error)})
+                return
+            except LobbyNotFoundError as error:
+                self.send_json(404, {"code": "lobby_not_found", "error": str(error)})
+                return
+            except LobbyMemberNotFoundError as error:
+                self.send_json(404, {"code": "member_not_found", "error": str(error)})
+                return
+            except LobbyPermissionError as error:
+                self.send_json(403, {"code": "forbidden", "error": str(error)})
+                return
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+                return
+
+        self.send_json(
+            200,
+            {
+                "adjustment": {
+                    "userId": adjustment.user_id,
+                    "username": adjustment.username,
+                    "points": adjustment.points,
+                    "createdAt": adjustment.created_at,
+                }
+            },
+        )
 
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
@@ -1298,6 +1402,11 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                     code=code,
                     requesting_user_id=int(authenticated_user["id"]),
                 )
+                custom_point_adjustments = list_lobby_custom_point_adjustments(
+                    connection,
+                    code=code,
+                    requesting_user_id=int(authenticated_user["id"]),
+                )
             except AuthenticationError as error:
                 self.send_json(401, {"code": "not_authenticated", "error": str(error)})
                 return
@@ -1322,6 +1431,7 @@ class LobbyRequestHandler(BaseHTTPRequestHandler):
                 matches,
                 special_predictions,
                 default_predictions,
+                custom_point_adjustments,
             ),
         )
 
