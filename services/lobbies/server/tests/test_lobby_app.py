@@ -16,6 +16,8 @@ from app import (
     get_host,
     get_port,
     global_prediction_closes_at,
+    match_loser,
+    match_winner,
     validate_auth_session,
 )
 from lobby_service.database import (
@@ -171,6 +173,23 @@ class PredictionTimingTest(unittest.TestCase):
 
 
 class LobbyScoreboardTest(unittest.TestCase):
+    def test_match_winner_and_loser_use_penalties_when_score_is_tied(self) -> None:
+        match = FinishedMatch(
+            id=1,
+            stage="Last 32",
+            group=None,
+            date="2026-06-29",
+            home_team="Colombia",
+            away_team="Ghana",
+            home_score=1,
+            away_score=1,
+            home_penalty_score=4,
+            away_penalty_score=5,
+        )
+
+        self.assertEqual(match_winner(match), "Ghana")
+        self.assertEqual(match_loser(match), "Colombia")
+
     def test_build_scoreboard_splits_group_and_knockout_points(self) -> None:
         lobby = LobbyRecord(
             code="ABCD",

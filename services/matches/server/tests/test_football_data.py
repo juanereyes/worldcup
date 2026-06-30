@@ -76,6 +76,67 @@ def test_skips_today_when_there_are_no_matches() -> None:
     assert [item["id"] for item in selected] == [2, 3]
 
 
+def test_regular_duration_uses_full_time_score() -> None:
+    raw_match = match(1, "2026-06-11T19:00:00Z")
+    raw_match["score"] = {
+        "duration": "REGULAR",
+        "fullTime": {"home": 2, "away": 1},
+        "regularTime": {"home": 2, "away": 1},
+        "extraTime": {"home": 0, "away": 0},
+    }
+
+    normalized = football_data.normalize_match(raw_match).to_payload()
+
+    assert normalized["score"] == {"home": 2, "away": 1, "penalties": None}
+
+
+def test_non_regular_duration_scores_regular_plus_extra_time_without_penalties() -> None:
+    raw_match = match(1, "2026-06-11T19:00:00Z")
+    raw_match["score"] = {
+        "duration": "PENALTY_SHOOTOUT",
+        "fullTime": {"home": 6, "away": 5},
+        "regularTime": {"home": 1, "away": 1},
+        "extraTime": {"home": 1, "away": 1},
+        "penalties": {"home": 0, "away": 0},
+    }
+
+    normalized = football_data.normalize_match(raw_match).to_payload()
+
+    assert normalized["score"] == {"home": 2, "away": 2, "penalties": {"home": 4, "away": 3}}
+
+
+def test_penalty_shootout_score_is_inferred_from_full_time_difference() -> None:
+    raw_match = match(1, "2026-06-11T19:00:00Z")
+    raw_match["score"] = {
+        "duration": "PENALTY_SHOOTOUT",
+        "fullTime": {"home": 5, "away": 6},
+        "regularTime": {"home": 1, "away": 1},
+        "extraTime": {"home": 0, "away": 0},
+        "penalties": {"home": 99, "away": 99},
+    }
+
+    normalized = football_data.normalize_match(raw_match).to_payload()
+
+    assert normalized["score"] == {"home": 1, "away": 1, "penalties": {"home": 4, "away": 5}}
+
+
+def test_fallback_merge_preserves_extra_time_score_fields() -> None:
+    raw_match = match(1, "2026-06-11T19:00:00Z")
+    team_match = match(1, "2026-06-11T19:00:00Z")
+    team_match["score"] = {
+        "duration": "PENALTY_SHOOTOUT",
+        "fullTime": {"home": 6, "away": 5},
+        "regularTime": {"home": 1, "away": 1},
+        "extraTime": {"home": 1, "away": 1},
+        "penalties": {"home": 0, "away": 0},
+    }
+
+    merged = football_data.merge_score_from_team_match(raw_match, team_match)
+    normalized = football_data.normalize_match(merged).to_payload()
+
+    assert normalized["score"] == {"home": 2, "away": 2, "penalties": {"home": 4, "away": 3}}
+
+
 def test_world_cup_matches_cache_reuses_recent_fetch(monkeypatch) -> None:
     calls = 0
     football_data._matches_cache = None

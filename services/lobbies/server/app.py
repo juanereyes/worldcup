@@ -108,6 +108,8 @@ class FinishedMatch:
     away_team: str
     home_score: int
     away_score: int
+    home_penalty_score: int | None = None
+    away_penalty_score: int | None = None
 
 
 @dataclass(frozen=True)
@@ -225,6 +227,9 @@ def fetch_finished_matches() -> dict[int, FinishedMatch]:
         raw_score = raw_match.get("score") if isinstance(raw_match.get("score"), dict) else {}
         home_score = raw_score.get("home")
         away_score = raw_score.get("away")
+        penalties = raw_score.get("penalties") if isinstance(raw_score.get("penalties"), dict) else {}
+        home_penalty_score = penalties.get("home")
+        away_penalty_score = penalties.get("away")
 
         if not isinstance(home_score, int) or not isinstance(away_score, int):
             continue
@@ -243,6 +248,8 @@ def fetch_finished_matches() -> dict[int, FinishedMatch]:
             away_team=str(raw_match.get("awayTeam", "")),
             home_score=home_score,
             away_score=away_score,
+            home_penalty_score=home_penalty_score if isinstance(home_penalty_score, int) else None,
+            away_penalty_score=away_penalty_score if isinstance(away_penalty_score, int) else None,
         )
 
     return finished_matches
@@ -883,11 +890,24 @@ def actual_global_placements(matches: dict[int, FinishedMatch]) -> dict[str, str
 
 
 def match_winner(match: FinishedMatch) -> str:
-    return match.home_team if match.home_score > match.away_score else match.away_team
+    if match.home_score > match.away_score:
+        return match.home_team
+
+    if match.away_score > match.home_score:
+        return match.away_team
+
+    if (
+        match.home_penalty_score is not None
+        and match.away_penalty_score is not None
+        and match.home_penalty_score > match.away_penalty_score
+    ):
+        return match.home_team
+
+    return match.away_team
 
 
 def match_loser(match: FinishedMatch) -> str:
-    return match.away_team if match.home_score > match.away_score else match.home_team
+    return match.away_team if match_winner(match) == match.home_team else match.home_team
 
 
 def load_player_stats() -> list[PlayerStat]:

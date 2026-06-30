@@ -50,6 +50,8 @@ class CarouselMatch:
     away_team: str
     home_score: int | None
     away_score: int | None
+    home_penalty_score: int | None = None
+    away_penalty_score: int | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -63,6 +65,14 @@ class CarouselMatch:
             "score": {
                 "home": self.home_score,
                 "away": self.away_score,
+                "penalties": (
+                    {
+                        "home": self.home_penalty_score,
+                        "away": self.away_penalty_score,
+                    }
+                    if self.home_penalty_score is not None and self.away_penalty_score is not None
+                    else None
+                ),
             },
         }
 
@@ -158,6 +168,57 @@ def full_time_score(match: dict[str, Any]) -> dict[str, Any]:
     return full_time
 
 
+def scoring_score(match: dict[str, Any]) -> dict[str, Any]:
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    duration = score.get("duration")
+
+    if duration == "REGULAR":
+        return full_time_score(match)
+
+    regular_time = score.get("regularTime") if isinstance(score.get("regularTime"), dict) else {}
+    extra_time = score.get("extraTime") if isinstance(score.get("extraTime"), dict) else {}
+    home_regular = regular_time.get("home")
+    away_regular = regular_time.get("away")
+    home_extra = extra_time.get("home")
+    away_extra = extra_time.get("away")
+
+    if all(isinstance(value, int) for value in (home_regular, away_regular, home_extra, away_extra)):
+        return {
+            "home": home_regular + home_extra,
+            "away": away_regular + away_extra,
+        }
+
+    return full_time_score(match)
+
+
+def penalty_shootout_score(match: dict[str, Any]) -> dict[str, Any]:
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+
+    if score.get("duration") == "REGULAR":
+        return {}
+
+    full_time = full_time_score(match)
+    match_score = scoring_score(match)
+    full_home = full_time.get("home")
+    full_away = full_time.get("away")
+    score_home = match_score.get("home")
+    score_away = match_score.get("away")
+
+    if not all(isinstance(value, int) for value in (full_home, full_away, score_home, score_away)):
+        return {}
+
+    penalty_home = full_home - score_home
+    penalty_away = full_away - score_away
+
+    if penalty_home < 0 or penalty_away < 0 or penalty_home == penalty_away:
+        return {}
+
+    return {
+        "home": penalty_home,
+        "away": penalty_away,
+    }
+
+
 def has_full_time_score(match: dict[str, Any]) -> bool:
     full_time = full_time_score(match)
 
@@ -197,7 +258,10 @@ def merge_score_from_team_match(match: dict[str, Any], team_match: dict[str, Any
     updated_score = dict(updated.get("score")) if isinstance(updated.get("score"), dict) else {}
     team_score = team_match.get("score") if isinstance(team_match.get("score"), dict) else {}
 
-    updated_score["fullTime"] = dict(full_time_score(team_match))
+    for key in ("duration", "fullTime", "regularTime", "extraTime", "penalties"):
+        if key in team_score:
+            value = team_score.get(key)
+            updated_score[key] = dict(value) if isinstance(value, dict) else value
 
     if "winner" in team_score:
         updated_score["winner"] = team_score.get("winner")
@@ -465,8 +529,8 @@ def team_name(team: dict[str, Any]) -> str:
 
 
 def normalize_match(match: dict[str, Any]) -> CarouselMatch:
-    score = match.get("score") if isinstance(match.get("score"), dict) else {}
-    full_time = score.get("fullTime") if isinstance(score.get("fullTime"), dict) else {}
+    score = scoring_score(match)
+    penalties = penalty_shootout_score(match)
     home_team = match.get("homeTeam") if isinstance(match.get("homeTeam"), dict) else {}
     away_team = match.get("awayTeam") if isinstance(match.get("awayTeam"), dict) else {}
 
@@ -478,8 +542,10 @@ def normalize_match(match: dict[str, Any]) -> CarouselMatch:
         group=format_api_label(match.get("group")) if isinstance(match.get("group"), str) else None,
         home_team=team_name(home_team),
         away_team=team_name(away_team),
-        home_score=full_time.get("home") if isinstance(full_time.get("home"), int) else None,
-        away_score=full_time.get("away") if isinstance(full_time.get("away"), int) else None,
+        home_score=score.get("home") if isinstance(score.get("home"), int) else None,
+        away_score=score.get("away") if isinstance(score.get("away"), int) else None,
+        home_penalty_score=penalties.get("home") if isinstance(penalties.get("home"), int) else None,
+        away_penalty_score=penalties.get("away") if isinstance(penalties.get("away"), int) else None,
     )
 
 

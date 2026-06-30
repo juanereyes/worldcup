@@ -114,6 +114,10 @@ type CarouselMatch = {
   score: {
     home: number | null;
     away: number | null;
+    penalties?: {
+      home: number | null;
+      away: number | null;
+    } | null;
   };
 };
 
@@ -2466,7 +2470,39 @@ const getWinnerSide = (match: CarouselMatch) => {
   if (match.score.home > match.score.away) return "home";
   if (match.score.away > match.score.home) return "away";
 
+  const homePenalties = getPenaltyScore(match, "home");
+  const awayPenalties = getPenaltyScore(match, "away");
+
+  if (homePenalties !== null && awayPenalties !== null) {
+    if (homePenalties > awayPenalties) return "home";
+    if (awayPenalties > homePenalties) return "away";
+  }
+
   return null;
+};
+
+const getPenaltyScore = (match: CarouselMatch, side: "home" | "away") => {
+  const penalties = match.score.penalties;
+
+  if (!penalties) {
+    return null;
+  }
+
+  const value = side === "home" ? penalties.home : penalties.away;
+
+  return typeof value === "number" ? value : null;
+};
+
+const formatMatchScore = (match: CarouselMatch, side: "home" | "away") => {
+  const value = side === "home" ? match.score.home : match.score.away;
+
+  if (value === null) {
+    return "–";
+  }
+
+  const penaltyScore = getPenaltyScore(match, side);
+
+  return penaltyScore === null ? String(value) : `${value} (${penaltyScore})`;
 };
 
 const getBracketLayout = (stageMatchCount: number, matchIndex: number) => {
@@ -2508,7 +2544,6 @@ const renderMatchCarousel = (selectedCopy: Copy, language: Language) => {
     `;
   }
 
-  const hasScore = match.score.home !== null && match.score.away !== null;
   const matchDate = formatMatchDate(match.utcDate, language);
 
   return `
@@ -2525,12 +2560,12 @@ const renderMatchCarousel = (selectedCopy: Copy, language: Language) => {
         <div class="team-row">
           ${renderTeamBadge(match.homeTeam, language)}
           <span>${getTeamDisplayName(match.homeTeam, language)}</span>
-          <strong>${hasScore ? match.score.home : "–"}</strong>
+          <strong>${formatMatchScore(match, "home")}</strong>
         </div>
         <div class="team-row">
           ${renderTeamBadge(match.awayTeam, language)}
           <span>${getTeamDisplayName(match.awayTeam, language)}</span>
-          <strong>${hasScore ? match.score.away : "–"}</strong>
+          <strong>${formatMatchScore(match, "away")}</strong>
         </div>
       </div>
       <div class="carousel-controls">
@@ -2858,7 +2893,6 @@ const getPlayerPredictionLabel = (selectedCopy: Copy, predictionId: PlayerPredic
 };
 
 const renderMatchListItem = (match: CarouselMatch, selectedCopy: Copy, language: Language) => {
-  const hasScore = match.score.home !== null && match.score.away !== null;
   const status = getMatchStatusLabel(match.status, selectedCopy);
   const matchLabel = localizeMatchLabel(match.group ?? match.stage, language);
 
@@ -2874,9 +2908,9 @@ const renderMatchListItem = (match: CarouselMatch, selectedCopy: Copy, language:
           <span>${getTeamDisplayName(match.homeTeam, language)}</span>
         </div>
         <div class="match-score">
-          <strong>${hasScore ? match.score.home : "–"}</strong>
+          <strong>${formatMatchScore(match, "home")}</strong>
           <span>:</span>
-          <strong>${hasScore ? match.score.away : "–"}</strong>
+          <strong>${formatMatchScore(match, "away")}</strong>
         </div>
         <div class="match-list-team match-list-team-away">
           <span>${getTeamDisplayName(match.awayTeam, language)}</span>
@@ -3091,7 +3125,7 @@ const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, lan
           <span>${getTeamDisplayName(match.homeTeam, language)}</span>
           ${
             hasFinishedScore
-              ? `<strong class="prediction-actual-score" aria-label="${selectedCopy.match.final} ${match.score.home}">${match.score.home}</strong>`
+              ? `<strong class="prediction-actual-score" aria-label="${selectedCopy.match.final} ${formatMatchScore(match, "home")}">${formatMatchScore(match, "home")}</strong>`
               : ""
           }
           <input
@@ -3110,7 +3144,7 @@ const renderPredictionMatchCard = (match: CarouselMatch, selectedCopy: Copy, lan
           <span>${getTeamDisplayName(match.awayTeam, language)}</span>
           ${
             hasFinishedScore
-              ? `<strong class="prediction-actual-score" aria-label="${selectedCopy.match.final} ${match.score.away}">${match.score.away}</strong>`
+              ? `<strong class="prediction-actual-score" aria-label="${selectedCopy.match.final} ${formatMatchScore(match, "away")}">${formatMatchScore(match, "away")}</strong>`
               : ""
           }
           <input
@@ -3234,7 +3268,7 @@ const renderBracketTeam = (match: CarouselMatch, side: "home" | "away", language
         ${renderTeamBadge(teamName, language)}
         <span>${getTeamDisplayName(teamName, language)}</span>
       </span>
-      ${score === null ? "" : `<strong>${score}</strong>`}
+      ${score === null ? "" : `<strong>${formatMatchScore(match, side)}</strong>`}
     </div>
   `;
 };
